@@ -1,0 +1,17 @@
+{
+  "name": "typarchy-backend",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "convex dev",
+    "deploy": "convex deploy",
+    "typecheck": "tsc --noEmit -p convex",
+    "test": "node --test scripts/rules.test.ts"
+  },
+  "dependencies": {
+    "convex": "^1.45.0"
+  },
+  "devDependencies": {
+    "typescript": "^7.0.2"
+  }
+}

@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "id": "typarchy.game",
+  "name": "Typarchy",
+  "version": "0.1.0",
+  "author": "Oliver Oxenham",
+  "description": "Survival speed-typing with a worldwide leaderboard. Type each word before the shrinking clock runs out.",
+  "kinds": [
+    "overlay",
+    "bar-widget"
+  ],
+  "keepLoaded": true,
+  "entryPoints": {
+    "overlay": "Typarchy.qml",
+    "barWidget": "BarWidget.qml"
+  },
+  "barWidget": {
+    "displayName": "Typarchy",
+    "description": "Your Typarchy best score and rank; click to play",
+    "category": "Games",
+    "allowMultiple": false,
+    "defaultSection": "right"
+  }
+}
