@@ -65,6 +65,7 @@ export const me = query({
       bestScore: v.number(),
       runCount: v.number(),
       rank: v.union(v.number(), v.null()),
+      isAdmin: v.boolean(),
       recentRuns: v.array(
         v.object({
           score: v.number(),
@@ -89,6 +90,7 @@ export const me = query({
       bestScore: player.bestScore,
       runCount: player.runCount,
       rank: await rankFor(ctx, player),
+      isAdmin: player.isAdmin === true,
       recentRuns: runs.map((r) => ({
         score: r.score,
         words: r.words,

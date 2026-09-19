@@ -54,6 +54,9 @@ Item {
   property bool boardLoading: false
   property string boardError: ""
   property var practiceWords: []
+  // Held runs, fetched only for admins (the server refuses everyone else).
+  property var pendingRuns: []
+  property string reviewError: ""
 
   // --- Nickname entry ---
   property string nicknameDraft: ""
@@ -178,7 +181,23 @@ Item {
       if (!error && value) {
         root.me = value
         root.saveProfile()
+        if (value.isAdmin) root.refreshPending()
+        else root.pendingRuns = []
       }
+    })
+  }
+
+  function refreshPending() {
+    root.request("query", "moderation:pending", { token: root.playerToken }, 8000, function(error, value) {
+      if (!error) root.pendingRuns = value
+    })
+  }
+
+  function reviewRun(runId, decision) {
+    root.reviewError = ""
+    root.request("mutation", "moderation:review", { token: root.playerToken, runId: runId, decision: decision }, 8000, function(error) {
+      if (error) root.reviewError = error.message
+      root.refreshBoard()
     })
   }
 
@@ -431,7 +450,7 @@ Item {
     case "rejected": return "not ranked: " + root.submitError
     case "accepted":
       var r = root.submitResult
-      if (r.pending) return "held for review — it counts once a moderator approves it"
+      if (r.pending) return "held for review — it counts once an admin approves it"
       var rank = r.rank ? "#" + r.rank + " worldwide" : "unranked"
       return r.isPersonalBest ? "new personal best · " + rank : "best " + r.personalBest + " · " + rank
     }
@@ -510,6 +529,33 @@ Item {
     font.pixelSize: Style.font.caption
     font.letterSpacing: Style.space(2)
     font.capitalization: Font.AllUppercase
+  }
+
+  component ReviewButton: Rectangle {
+    id: reviewButton
+    property string label
+    property color tint
+    signal clicked()
+    implicitWidth: buttonText.implicitWidth + Style.spacing.md * 2
+    implicitHeight: buttonText.implicitHeight + Style.spacing.xs * 2
+    radius: root.cornerRadius
+    color: buttonMouse.containsMouse ? Util.alpha(tint, 0.25) : Util.alpha(tint, 0.12)
+    Text {
+      id: buttonText
+      anchors.centerIn: parent
+      textFormat: Text.PlainText
+      text: reviewButton.label
+      color: reviewButton.tint
+      font.family: root.fontFamily
+      font.pixelSize: Style.font.bodySmall
+    }
+    MouseArea {
+      id: buttonMouse
+      anchors.fill: parent
+      hoverEnabled: true
+      cursorShape: Qt.PointingHandCursor
+      onClicked: reviewButton.clicked()
+    }
   }
 
   component Stat: Column {
@@ -882,6 +928,71 @@ Item {
             anchors { top: parent.top; bottom: parent.bottom; left: parent.left }
             width: (parent.width - Style.spacing.huge * 2) * 0.58
             spacing: Style.spacing.md
+
+            // Admins only: runs held for review, oldest first.
+            Column {
+              visible: !!root.me && root.me.isAdmin && root.pendingRuns.length > 0
+              width: parent.width
+              spacing: Style.spacing.sm
+
+              Label { text: "held for review"; color: root.urgent }
+              Label {
+                visible: root.reviewError !== ""
+                text: root.reviewError
+                color: root.urgent
+                font.capitalization: Font.MixedCase
+                font.letterSpacing: 0
+                font.pixelSize: Style.font.bodySmall
+              }
+              Repeater {
+                model: root.pendingRuns
+                delegate: Column {
+                  required property var modelData
+                  width: parent.width
+                  spacing: Style.spacing.xs
+                  Row {
+                    width: parent.width
+                    spacing: Style.spacing.lg
+                    Text {
+                      width: parent.width - Style.space(64) - approveButton.width - rejectButton.width - Style.spacing.lg * 3
+                      textFormat: Text.PlainText
+                      elide: Text.ElideRight
+                      text: modelData.name + " · " + modelData.words + "w"
+                      color: root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                    }
+                    Text {
+                      width: Style.space(64)
+                      horizontalAlignment: Text.AlignRight
+                      textFormat: Text.PlainText
+                      text: String(modelData.score)
+                      color: root.accent
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      font.bold: true
+                    }
+                    ReviewButton { id: approveButton; label: "approve"; tint: root.accent; onClicked: root.reviewRun(modelData.runId, "approve") }
+                    ReviewButton { id: rejectButton; label: "reject"; tint: root.urgent; onClicked: root.reviewRun(modelData.runId, "reject") }
+                  }
+                  Text {
+                    width: parent.width
+                    textFormat: Text.PlainText
+                    elide: Text.ElideRight
+                    text: {
+                      var st = modelData.stats
+                      var parts = [modelData.flags.join(", ")]
+                      if (st) parts.push(Math.round(st.msPerLetter) + "ms/letter", "react " + Math.round(st.medianReactionMs) + "ms", st.typos + " typos")
+                      return parts.join(" · ")
+                    }
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                  }
+                }
+              }
+              Rectangle { width: parent.width; height: 1; color: root.faint }
+            }
 
             Label { text: "top typists worldwide" }
 

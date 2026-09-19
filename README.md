@@ -98,8 +98,8 @@ Rules live in `backend/convex/lib/rules.ts` and are mirrored in `Rules.js`;
 - **Review.** A run that would raise a player's best is held for review instead of going
   straight to the board when it looks unusual: very fast typing or reactions, fairly even
   keystrokes, no typos over 60+ words. The same goes for any new #1, and, once the board has 25
-  players, any run entering the top 10. It shows as "review" in your last runs until a
-  moderator approves it.
+  players, any run entering the top 10. It shows as "review" in your last runs until an
+  admin approves it.
 - **Rate limits.** Each player can start 30 runs at once and 60 per hour after that.
   Nickname claims are capped at 20 per hour across everyone.
 - **What this doesn't stop.** The client is open source, so a script can always play like
@@ -141,6 +141,17 @@ npx convex run --prod wordSync:refresh
 Then set `Config.js` → `convexUrl` to the production deployment URL.
 
 ### Moderation
+
+Admins review held runs in the game: the leaderboard tab lists them with approve and
+reject buttons. Only players flagged as admin see the list, and the server checks the flag
+on every call, so a modified client gets nowhere. The flag can only be set with deploy
+access:
+
+```bash
+npx convex run admin:setAdmin '{"name":"someone","isAdmin":true}'
+```
+
+The same review works from the command line:
 
 ```bash
 npx convex run admin:pendingRuns                           # runs held for review, with why

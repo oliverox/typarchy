@@ -15,7 +15,9 @@ import type * as leaderboard from "../leaderboard.js";
 import type * as lib_auth from "../lib/auth.js";
 import type * as lib_humanity from "../lib/humanity.js";
 import type * as lib_rateLimit from "../lib/rateLimit.js";
+import type * as lib_review from "../lib/review.js";
 import type * as lib_rules from "../lib/rules.js";
+import type * as moderation from "../moderation.js";
 import type * as players from "../players.js";
 import type * as wordSync from "../wordSync.js";
 
@@ -33,7 +35,9 @@ declare const fullApi: ApiFromModules<{
   "lib/auth": typeof lib_auth;
   "lib/humanity": typeof lib_humanity;
   "lib/rateLimit": typeof lib_rateLimit;
+  "lib/review": typeof lib_review;
   "lib/rules": typeof lib_rules;
+  moderation: typeof moderation;
   players: typeof players;
   wordSync: typeof wordSync;
 }>;

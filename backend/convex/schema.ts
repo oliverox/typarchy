@@ -9,6 +9,9 @@ export default defineSchema({
     bestScore: v.number(),
     bestWords: v.number(),
     runCount: v.number(),
+    // Can approve and reject held runs from the game. Only settable with
+    // deploy access: `npx convex run --prod admin:setAdmin`.
+    isAdmin: v.optional(v.boolean()),
   })
     .index("by_nameKey", ["nameKey"])
     .index("by_tokenHash", ["tokenHash"])
@@ -45,6 +48,8 @@ export default defineSchema({
     status: v.optional(v.union(v.literal("ranked"), v.literal("pending"), v.literal("rejected"))),
     // Why the run was held for review.
     flags: v.optional(v.array(v.string())),
+    // The admin who approved or rejected a held run.
+    reviewedBy: v.optional(v.id("players")),
     stats: v.optional(
       v.object({
         medianReactionMs: v.number(),
