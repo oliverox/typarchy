@@ -3,7 +3,7 @@ import { internalMutation, mutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requirePlayer } from "./lib/auth";
-import { analyze } from "./lib/humanity";
+import { analyze, OLD_CLIENT_REASON } from "./lib/humanity";
 import { consume, RUN_STARTS } from "./lib/rateLimit";
 import { replay } from "./lib/rules";
 import { rankFor } from "./players";
@@ -26,6 +26,15 @@ const MIN_LAG_MS = -1500;
 const MAX_LAG_MS = 10_000;
 
 const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
+
+// What a player sees when a run looks scripted. The specific check stays in
+// the deployment logs, so nobody learns which one to work around.
+const BOT_REASON = "detected as a bot typing";
+
+function botDetected(reason: string) {
+  console.log(`run rejected as scripted: ${reason}`);
+  return { ok: false as const, reason: BOT_REASON };
+}
 
 // Once the board is this busy, a run entering the top 10 is held for review.
 // Before that, only a new #1 is.
@@ -230,9 +239,9 @@ function verify(
   now: number,
 ) {
   const result = replay(session.words, events);
-  if (!result.ok) return result;
+  if (!result.ok) return botDetected(result.reason);
   const human = analyze(session.words, events);
-  if (!human.ok) return human;
+  if (!human.ok) return human.reason === OLD_CLIENT_REASON ? human : botDetected(human.reason);
 
   const elapsed = now - session.startedAt;
   const lagOk = (lag: number) => lag >= MIN_LAG_MS && lag <= MAX_LAG_MS;
@@ -244,7 +253,7 @@ function verify(
   for (const cp of session.checkpoints) {
     if (cp.count < 1 || cp.count > events.length) continue;
     if (Math.abs(events[cp.count - 1].t - cp.t) > 1) {
-      return { ok: false as const, reason: `checkpoint ${cp.count} doesn't match the run` };
+      return botDetected(`checkpoint ${cp.count} doesn't match the run`);
     }
     if (!lagOk(cp.at - session.startedAt - cp.t)) {
       return { ok: false as const, reason: `run was paused around word ${cp.count}` };
