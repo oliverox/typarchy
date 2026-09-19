@@ -21,6 +21,29 @@ Item {
   property bool opened: false
   // "board" shows the leaderboard instead of the game.
   property string view: "game"
+  onViewChanged: root.typeTitle()
+
+  // How much of "TYPARCHY" is showing; typed out on open and on view changes.
+  readonly property string titleText: "TYPARCHY"
+  property int titleLetters: titleText.length
+  readonly property bool titleTyping: titleLetters < titleText.length
+
+  function typeTitle() {
+    root.titleLetters = 0
+    titleTimer.restart()
+  }
+
+  // Uneven gaps between letters, like a person typing.
+  Timer {
+    id: titleTimer
+    interval: 60
+    repeat: true
+    onTriggered: {
+      root.titleLetters += 1
+      if (!root.titleTyping) stop()
+      else interval = 45 + Math.random() * 70
+    }
+  }
 
   // --- Identity and profile (persisted under stateDir) ---
   property bool identityLoaded: false
@@ -96,6 +119,7 @@ Item {
     try { payload = JSON.parse(payloadJson || "{}") } catch (e) {}
     root.opened = true
     root.view = payload.view === "board" ? "board" : "game"
+    root.typeTitle()
     if (root.phase === "over" || root.phase === "idle") root.notice = ""
     root.refreshBoard()
     Qt.callLater(function() { keyCatcher.forceActiveFocus() })
@@ -563,7 +587,7 @@ Item {
             spacing: 0
             Text {
               textFormat: Text.PlainText
-              text: "TYP"
+              text: root.titleText.slice(0, Math.min(3, root.titleLetters))
               color: root.foreground
               font.family: root.fontFamily
               font.pixelSize: Style.font.displayLarge
@@ -571,7 +595,7 @@ Item {
             }
             Text {
               textFormat: Text.PlainText
-              text: "ARCHY"
+              text: root.titleText.slice(3, Math.max(3, root.titleLetters))
               color: root.accent
               font.family: root.fontFamily
               font.pixelSize: Style.font.displayLarge
@@ -583,8 +607,11 @@ Item {
               anchors.verticalCenter: parent.verticalCenter
               anchors.verticalCenterOffset: Style.space(1)
               color: root.accent
-              SequentialAnimation on opacity {
-                running: root.opened
+              // Solid while the title types, blinking once it's done.
+              property real blink: 1
+              opacity: root.titleTyping ? 1 : blink
+              SequentialAnimation on blink {
+                running: root.opened && !root.titleTyping
                 loops: Animation.Infinite
                 NumberAnimation { to: 0; duration: 530; easing.type: Easing.InQuad }
                 NumberAnimation { to: 1; duration: 530; easing.type: Easing.OutQuad }
