@@ -5,7 +5,13 @@ Survival speed-typing for [Omarchy](https://omarchy.org), with a worldwide leade
 One word at a time, one shrinking clock. Type the word before the bar empties;
 every word makes the clock tighter. A wrong key breaks your streak.
 
-![Typarchy start screen](preview.png)
+It's a great workout for your brain, and a perfect way to spend the minutes while you
+wait for your AI agent to finish its task. Hit the keybinding, play a round, and get
+back to work when it's done.
+
+![Typarchy mid-run, typing a word](preview.png)
+
+![Typarchy worldwide leaderboard](leaderboard.png)
 
 The repo is both the Omarchy shell plugin (repo root) and its Convex backend (`backend/`).
 

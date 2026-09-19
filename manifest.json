@@ -4,7 +4,7 @@
   "name": "Typarchy",
   "version": "0.1.0",
   "author": "Oliver Oxenham",
-  "description": "Survival speed-typing with a worldwide leaderboard. Type each word before the shrinking clock runs out.",
+  "description": "Survival speed-typing with a worldwide leaderboard. Type each word before the shrinking clock runs out. A quick workout for your brain, perfect while you wait for your AI agent to finish its task.",
   "kinds": [
     "overlay",
     "bar-widget"
