@@ -55,8 +55,9 @@ Removing the plugin doesn't delete your leaderboard entry. Remove any keybinding
 
 Typarchy needs no extra packages beyond Omarchy's shell. The ranked mode talks over HTTPS to
 the Typarchy leaderboard, a [Convex](https://convex.dev) deployment (`Config.js`). It sends
-only your chosen nickname, its token, and run data (word timings and typo counts). Nothing
-else leaves your machine. Offline practice needs no network.
+only your chosen nickname, its token, and run data: when each word was finished, how many
+typos it took, and the timing of the keys that typed it (so the server can tell people
+from scripts). Nothing else leaves your machine. Offline practice needs no network.
 
 The `backend/` folder is the server code. You don't need to install it to play.
 
