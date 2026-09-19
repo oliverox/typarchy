@@ -76,6 +76,8 @@ The `backend/` folder is the server code. You don't need to install it to play.
 - The first word gets 4.2s. Each completed word shrinks the next window by 3.5%, down to 1.2s.
 - A word scores `letters × 10 + remaining time / 100ms`.
 - A wrong keystroke breaks the streak but costs no time.
+- Nobody reads and types faster than 150ms for the first key plus 35ms per further letter, so
+  a word completed sooner doesn't count.
 - The run ends when the clock hits zero.
 
 Rules live in `backend/convex/lib/rules.ts` and are mirrored in `Rules.js`;
@@ -89,8 +91,21 @@ Rules live in `backend/convex/lib/rules.ts` and are mirrored in `Rules.js`;
   checks in every 10 words (and receives more words), then submits per-word timestamps
   and typo counts. The server replays the run with the same rules, computes the score
   itself, and rejects runs whose timing doesn't line up with its own clock (paused or
-  invented timestamps, impossibly fast words). A bot that actually plays can still win;
-  forged score submissions can't.
+  invented timestamps, impossibly fast words).
+- **Keystroke timing.** Each word carries the times of the keys that typed it. People type
+  unevenly; scripts keep a steady beat. Runs whose keystrokes or reaction times are too
+  even to be human are rejected (`backend/convex/lib/humanity.ts`).
+- **Review.** A run that would raise a player's best is held for review instead of going
+  straight to the board when it looks unusual: very fast typing or reactions, fairly even
+  keystrokes, no typos over 60+ words. The same goes for any new #1, and, once the board has 25
+  players, any run entering the top 10. It shows as "review" in your last runs until a
+  moderator approves it.
+- **Rate limits.** Each player can start 30 runs at once and 60 per hour after that.
+  Nickname claims are capped at 20 per hour across everyone.
+- **What this doesn't stop.** The client is open source, so a script can always play like
+  the real game does. These checks stop score forging, scripts at a steady beat and
+  superhuman runs. A careful bot that fakes human timing at top-human speed can still get
+  through, and review is where it gets caught.
 - **Offline.** If the leaderboard is unreachable the game falls back to an unranked
   practice run using words cached from your last ranked run.
 
@@ -128,8 +143,13 @@ Then set `Config.js` → `convexUrl` to the production deployment URL.
 ### Moderation
 
 ```bash
-npx convex run admin:removePlayer '{"name":"someone"}'   # add --prod for production
+npx convex run admin:pendingRuns                           # runs held for review, with why
+npx convex run admin:approveRun '{"runId":"..."}'           # rank it
+npx convex run admin:rejectRun '{"runId":"..."}'            # keep it off the board
+npx convex run admin:removePlayer '{"name":"someone"}'      # delete a player and their runs
 ```
+
+Add `--prod` to run these against production.
 
 ## License
 

@@ -3,6 +3,8 @@ import { internalMutation, mutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requirePlayer } from "./lib/auth";
+import { analyze } from "./lib/humanity";
+import { consume, RUN_STARTS } from "./lib/rateLimit";
 import { replay } from "./lib/rules";
 import { rankFor } from "./players";
 
@@ -24,6 +26,10 @@ const MIN_LAG_MS = -1500;
 const MAX_LAG_MS = 10_000;
 
 const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
+
+// Once the board is this busy, a run entering the top 10 is held for review.
+// Before that, only a new #1 is.
+const REVIEW_TOP_TEN_FROM_PLAYERS = 25;
 
 async function drawWords(ctx: MutationCtx, count: number): Promise<string[]> {
   const pool = await ctx.db.query("wordPool").first();
@@ -69,6 +75,7 @@ export const start = mutation({
   }),
   handler: async (ctx, args) => {
     const player = await requirePlayer(ctx, args.token);
+    await consume(ctx, `start:${player._id}`, RUN_STARTS);
 
     // One live run per player; starting again abandons the previous one.
     const previous = await ctx.db
@@ -122,11 +129,16 @@ export const submit = mutation({
   args: {
     token: v.string(),
     sessionId: v.id("sessions"),
-    events: v.array(v.object({ t: v.number(), typos: v.number() })),
+    // `keys` is optional only so old clients get a readable rejection.
+    events: v.array(
+      v.object({ t: v.number(), typos: v.number(), keys: v.optional(v.array(v.number())) }),
+    ),
   },
   returns: v.union(
     v.object({
       accepted: v.literal(true),
+      // Held for review: it counts once a moderator approves it.
+      pending: v.boolean(),
       score: v.number(),
       words: v.number(),
       bestStreak: v.number(),
@@ -147,7 +159,13 @@ export const submit = mutation({
       return { accepted: false as const, reason: verdict.reason };
     }
 
-    const isPersonalBest = verdict.score > player.bestScore;
+    const improves = verdict.score > player.bestScore;
+    const flags = [...verdict.flags];
+    if (improves) flags.push(...(await boardFlags(ctx, verdict.score)));
+    // A run that doesn't raise the player's best can't change the board.
+    const pending = improves && flags.length > 0;
+    const isPersonalBest = improves && !pending;
+
     const updated = {
       ...player,
       runCount: player.runCount + 1,
@@ -166,11 +184,15 @@ export const submit = mutation({
         words: verdict.words,
         bestStreak: verdict.bestStreak,
         durationMs: Math.round(verdict.endT),
+        status: pending ? "pending" : "ranked",
+        flags,
+        stats: verdict.stats,
       });
     }
 
     return {
       accepted: true as const,
+      pending,
       score: verdict.score,
       words: verdict.words,
       bestStreak: verdict.bestStreak,
@@ -181,13 +203,36 @@ export const submit = mutation({
   },
 });
 
+// Flags for a score that would reshape the top of the board.
+async function boardFlags(ctx: MutationCtx, score: number): Promise<string[]> {
+  const leader = await ctx.db
+    .query("players")
+    .withIndex("by_bestScore")
+    .order("desc")
+    .first();
+  if (!leader || score > leader.bestScore) return ["new #1"];
+
+  const ranked = await ctx.db
+    .query("players")
+    .withIndex("by_bestScore", (q) => q.gt("bestScore", 0))
+    .take(REVIEW_TOP_TEN_FROM_PLAYERS);
+  if (ranked.length < REVIEW_TOP_TEN_FROM_PLAYERS) return [];
+  const above = await ctx.db
+    .query("players")
+    .withIndex("by_bestScore", (q) => q.gte("bestScore", score))
+    .take(10);
+  return above.length < 10 ? ["top 10"] : [];
+}
+
 function verify(
   session: Doc<"sessions">,
-  events: { t: number; typos: number }[],
+  events: { t: number; typos: number; keys?: number[] }[],
   now: number,
 ) {
   const result = replay(session.words, events);
   if (!result.ok) return result;
+  const human = analyze(session.words, events);
+  if (!human.ok) return human;
 
   const elapsed = now - session.startedAt;
   const lagOk = (lag: number) => lag >= MIN_LAG_MS && lag <= MAX_LAG_MS;
@@ -211,7 +256,7 @@ function verify(
     return { ok: false as const, reason: "too many checkpoints never reached the server" };
   }
 
-  return result;
+  return { ...result, stats: human.stats, flags: human.flags };
 }
 
 export const expireSessions = internalMutation({

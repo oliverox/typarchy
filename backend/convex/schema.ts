@@ -40,5 +40,27 @@ export default defineSchema({
     words: v.number(),
     bestStreak: v.number(),
     durationMs: v.number(),
-  }).index("by_player", ["playerId"]),
+    // Missing on runs from before review existed: those count as ranked.
+    // A pending run waits for `admin:approveRun` before it counts.
+    status: v.optional(v.union(v.literal("ranked"), v.literal("pending"), v.literal("rejected"))),
+    // Why the run was held for review.
+    flags: v.optional(v.array(v.string())),
+    stats: v.optional(
+      v.object({
+        medianReactionMs: v.number(),
+        msPerLetter: v.number(),
+        keyGapCv: v.union(v.number(), v.null()),
+        reactionCv: v.union(v.number(), v.null()),
+        typos: v.number(),
+      }),
+    ),
+  })
+    .index("by_player", ["playerId"])
+    .index("by_status", ["status"]),
+
+  rateLimits: defineTable({
+    key: v.string(),
+    tokens: v.number(),
+    updatedAt: v.number(),
+  }).index("by_key", ["key"]),
 });

@@ -5,8 +5,16 @@ export const START_WINDOW_MS = 4200;
 export const MIN_WINDOW_MS = 1200;
 export const WINDOW_DECAY = 0.965;
 
-// Anything faster than this per letter is not a human typing a word it just saw.
-export const MIN_MS_PER_LETTER = 30;
+// A word appears only when the previous one is done, so nobody can start it
+// early: seeing it and pressing the first key takes at least MIN_REACTION_MS,
+// and every further letter at least MIN_MS_PER_KEY on average (≈340 WPM,
+// beyond the fastest human bursts).
+export const MIN_REACTION_MS = 150;
+export const MIN_MS_PER_KEY = 35;
+
+export function minimumWordMs(word: string): number {
+  return MIN_REACTION_MS + (word.length - 1) * MIN_MS_PER_KEY;
+}
 
 export type WordEvent = {
   // Milliseconds since the run started when the word was completed.
@@ -55,7 +63,7 @@ export function replay(
     if (!Number.isFinite(t) || !Number.isInteger(typos) || typos < 0) {
       return { ok: false, reason: `malformed event ${i}` };
     }
-    if (t - wordStart < word.length * MIN_MS_PER_LETTER) {
+    if (t - wordStart < minimumWordMs(word)) {
       return { ok: false, reason: `word ${i} typed impossibly fast` };
     }
     const deadline = wordStart + windowMs;

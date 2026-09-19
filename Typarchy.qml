@@ -53,6 +53,9 @@ Item {
   property real runStartedAt: 0
   property real now: 0
   property var events: []
+  // Run-relative times of the keys that touched the current word; sent with
+  // each word so the server can tell typing from a script.
+  property var wordKeys: []
   property int score: 0
   property int streak: 0
   property int bestStreak: 0
@@ -300,6 +303,7 @@ Item {
     root.windowMs = Rules.START_WINDOW_MS
     root.wordStart = 0
     root.events = []
+    root.wordKeys = []
     root.score = 0
     root.streak = 0
     root.bestStreak = 0
@@ -316,12 +320,17 @@ Item {
     root.phase = root.playerToken ? "idle" : "nickname"
   }
 
+  function recordKey() {
+    root.wordKeys.push(Math.round(root.now - root.runStartedAt))
+  }
+
   function typeLetter(letter) {
     root.now = Date.now()
     if (root.remainingMs <= 0) {
       root.endRun()
       return
     }
+    root.recordKey()
     var word = root.currentWord
     var next = (root.typed + letter).slice(0, word.length + 4)
     if (next === word) {
@@ -340,7 +349,8 @@ Item {
     root.score += Rules.wordScore(word, root.deadline - t)
     root.streak = root.typos > 0 ? 1 : root.streak + 1
     root.bestStreak = Math.max(root.bestStreak, root.streak)
-    root.events = root.events.concat([{ t: t, typos: root.typos }])
+    root.events = root.events.concat([{ t: t, typos: root.typos, keys: root.wordKeys }])
+    root.wordKeys = []
     root.windowMs = Rules.nextWindow(root.windowMs)
     root.wordStart = t
     root.typos = 0
@@ -397,6 +407,7 @@ Item {
     case "rejected": return "not ranked: " + root.submitError
     case "accepted":
       var r = root.submitResult
+      if (r.pending) return "held for review — it counts once a moderator approves it"
       var rank = r.rank ? "#" + r.rank + " worldwide" : "unranked"
       return r.isPersonalBest ? "new personal best · " + rank : "best " + r.personalBest + " · " + rank
     }
@@ -419,12 +430,10 @@ Item {
     }
 
     if (root.phase === "running") {
-      if (key === Qt.Key_Backspace) {
-        root.typed = ctrl ? "" : root.typed.slice(0, -1)
-        return true
-      }
-      if (ctrl && key === Qt.Key_W) {
-        root.typed = ""
+      if (key === Qt.Key_Backspace || (ctrl && key === Qt.Key_W)) {
+        root.now = Date.now()
+        if (root.remainingMs > 0) root.recordKey()
+        root.typed = key === Qt.Key_Backspace && !ctrl ? root.typed.slice(0, -1) : ""
         return true
       }
       var letter = ctrl ? "" : Rules.normalizeKey(event.text)
@@ -981,9 +990,18 @@ Item {
                   horizontalAlignment: Text.AlignRight
                   textFormat: Text.PlainText
                   text: String(modelData.score)
-                  color: root.accent
+                  color: modelData.status === "pending" || modelData.status === "rejected" ? root.dim : root.accent
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.body
+                  font.strikeout: modelData.status === "rejected"
+                }
+                Text {
+                  visible: modelData.status === "pending"
+                  textFormat: Text.PlainText
+                  text: "review"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
                 }
               }
             }

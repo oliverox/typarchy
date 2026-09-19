@@ -6,7 +6,7 @@ import * as server from "../convex/lib/rules.ts";
 // The plugin's Rules.js is a QML `.pragma library` script, not a module.
 const pluginSource = readFileSync(new URL("../../Rules.js", import.meta.url), "utf8")
   .replace(".pragma library", "");
-const plugin = new Function(`${pluginSource}; return { replay, nextWindow, wordScore, START_WINDOW_MS, MIN_WINDOW_MS, WINDOW_DECAY, MIN_MS_PER_LETTER };`)();
+const plugin = new Function(`${pluginSource}; return { replay, nextWindow, wordScore, START_WINDOW_MS, MIN_WINDOW_MS, WINDOW_DECAY, MIN_REACTION_MS, MIN_MS_PER_KEY, minimumWordMs };`)();
 
 function mulberry32(seed: number) {
   return () => {
@@ -30,7 +30,7 @@ function simulate(seed: number) {
   for (const word of words) {
     const typos = rand() < 0.15 ? 1 + Math.floor(rand() * 2) : 0;
     const budget = windowMs;
-    const minimum = word.length * server.MIN_MS_PER_LETTER;
+    const minimum = server.minimumWordMs(word);
     const took = minimum + rand() * (budget - minimum) * 1.08;
     if (took > budget) return { words, events };
     wordStart += Math.round(took);
@@ -41,7 +41,7 @@ function simulate(seed: number) {
 }
 
 test("plugin constants match the server", () => {
-  for (const key of ["START_WINDOW_MS", "MIN_WINDOW_MS", "WINDOW_DECAY", "MIN_MS_PER_LETTER"] as const) {
+  for (const key of ["START_WINDOW_MS", "MIN_WINDOW_MS", "WINDOW_DECAY", "MIN_REACTION_MS", "MIN_MS_PER_KEY"] as const) {
     assert.equal(plugin[key], server[key], key);
   }
 });
@@ -92,6 +92,10 @@ test("rejects impossible runs", () => {
   const words = ["comet", "harbor"];
   assert.equal(server.replay(words, [{ t: 4300, typos: 0 }]).ok, false, "after the clock");
   assert.equal(server.replay(words, [{ t: 100, typos: 0 }]).ok, false, "too fast");
+  // comet needs 150ms to react plus 4 × 35ms for the other letters.
+  assert.equal(server.replay(words, [{ t: 289, typos: 0 }]).ok, false, "just under the floor");
+  assert.equal(server.replay(words, [{ t: 290, typos: 0 }]).ok, true, "at the floor");
+  assert.equal(plugin.minimumWordMs("comet"), server.minimumWordMs("comet"));
   assert.equal(server.replay(words, [{ t: 1000, typos: 0 }, { t: 2000, typos: 0 }, { t: 3000, typos: 0 }]).ok, false, "unissued words");
   assert.equal(server.replay(words, [{ t: 1000, typos: -1 }]).ok, false, "negative typos");
 });

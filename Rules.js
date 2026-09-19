@@ -7,7 +7,8 @@
 var START_WINDOW_MS = 4200
 var MIN_WINDOW_MS = 1200
 var WINDOW_DECAY = 0.965
-var MIN_MS_PER_LETTER = 30
+var MIN_REACTION_MS = 150
+var MIN_MS_PER_KEY = 35
 
 function nextWindow(windowMs) {
   return Math.max(MIN_WINDOW_MS, windowMs * WINDOW_DECAY)
@@ -15,6 +16,10 @@ function nextWindow(windowMs) {
 
 function wordScore(word, remainingMs) {
   return word.length * 10 + Math.round(remainingMs / 100)
+}
+
+function minimumWordMs(word) {
+  return MIN_REACTION_MS + (word.length - 1) * MIN_MS_PER_KEY
 }
 
 function deadline(wordStart, windowMs) {
@@ -41,7 +46,7 @@ function replay(words, events) {
     var word = words[i]
     if (!isFinite(t) || Math.floor(typos) !== typos || typos < 0)
       return { ok: false, reason: "malformed event " + i }
-    if (t - wordStart < word.length * MIN_MS_PER_LETTER)
+    if (t - wordStart < minimumWordMs(word))
       return { ok: false, reason: "word " + i + " typed impossibly fast" }
     var end = deadline(wordStart, windowMs)
     if (t > end) return { ok: false, reason: "word " + i + " finished after the clock ran out" }

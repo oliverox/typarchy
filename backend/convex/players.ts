@@ -3,6 +3,7 @@ import { mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { findPlayer, hashToken, newToken } from "./lib/auth";
+import { consume, NICKNAME_CLAIMS } from "./lib/rateLimit";
 
 const NAME_PATTERN = /^[A-Za-z0-9_-]{3,16}$/;
 const RANK_SCAN_LIMIT = 10_000;
@@ -30,6 +31,7 @@ export const register = mutation({
       });
     }
 
+    await consume(ctx, "register", NICKNAME_CLAIMS);
     const token = newToken();
     await ctx.db.insert("players", {
       name,
@@ -69,6 +71,7 @@ export const me = query({
           words: v.number(),
           bestStreak: v.number(),
           playedAt: v.number(),
+          status: v.union(v.literal("ranked"), v.literal("pending"), v.literal("rejected")),
         }),
       ),
     }),
@@ -91,6 +94,7 @@ export const me = query({
         words: r.words,
         bestStreak: r.bestStreak,
         playedAt: r._creationTime,
+        status: r.status ?? "ranked",
       })),
     };
   },

@@ -18,7 +18,9 @@
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+    /* Lets lib/ modules import each other as .ts, so node --test can load them. */
+    "allowImportingTsExtensions": true
   },
   "include": ["./**/*"],
   "exclude": ["./_generated"]
