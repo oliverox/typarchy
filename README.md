@@ -41,6 +41,16 @@ o.bind("SUPER + SHIFT + T", "Typarchy", "omarchy-shell shell toggle typarchy.gam
 The bar widget (keyboard icon) shows your best score and rank. Left click plays,
 right click opens the leaderboard.
 
+## Update
+
+```bash
+omarchy plugin update typarchy.game
+omarchy restart shell
+```
+
+The shell keeps Typarchy loaded, so the update only takes effect after the restart.
+Until then you're still playing the old version, and the leaderboard may refuse its runs.
+
 ## Uninstall
 
 ```bash
