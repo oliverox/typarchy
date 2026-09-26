@@ -44,7 +44,7 @@ const REVIEW_CLEAN_WORDS = 60;
 const MIN_WORDS_FOR_SPEED_FLAGS = 10;
 
 export const OLD_CLIENT_REASON =
-  "this version of Typarchy can't be ranked any more. Update it with `omarchy plugin update typarchy.game`";
+  "this version of Typarchy can't be ranked any more. Update it with `omarchy plugin update typarchy.game`, then run `omarchy restart shell`";
 
 function spread(values: number[]): number {
   const mean = values.reduce((a, b) => a + b, 0) / values.length;
