@@ -70,14 +70,16 @@ What stays behind:
 ## Dependencies and network use
 
 Typarchy needs no extra packages beyond Omarchy's shell. The ranked mode talks over HTTPS to
-the Typarchy leaderboard, a [Convex](https://convex.dev) deployment (`Config.js`). It sends
+the Typarchy leaderboard, a [Convex](https://convex.dev) deployment (fixed in `bin/typarchy-api`). It sends
 only your chosen nickname, its token, and run data: when each word was finished, how many
 typos it took, and the timing of the keys that typed it (so the server can tell people
 from scripts). Nothing else leaves your machine. Offline practice needs no network.
 
-The only files it writes are the two in `~/.local/state/typarchy/` (see Removing). They are
-read and written by `bin/typarchy-state` (Python standard library, run with the system
-`python3`), which refuses symlinks and oversized files and creates them 0600.
+Two small helpers do the I/O, both Python standard library run with the system `python3`:
+`bin/typarchy-api` makes the leaderboard calls (that one host only, no redirects or proxies,
+replies capped at 256 KiB, your token passed on stdin), and `bin/typarchy-state` reads and
+writes the only two files the game keeps, in `~/.local/state/typarchy/` (see Removing). It
+refuses symlinks and oversized files and creates them 0600.
 
 The `backend/` folder is the server code. You don't need to install it to play.
 

@@ -15,7 +15,7 @@ npx convex run wordSync:refresh      # fill the word pool (≈30s)
 npm test
 ```
 
-The plugin talks to the URL in [`Config.js`](../Config.js). To play against a local backend, set
+The plugin talks to the URL in [`bin/typarchy-api`](../bin/typarchy-api) (`CONVEX_URL`). To play against a local backend, set
 `TYPARCHY_CONVEX_URL=http://127.0.0.1:3210` in the shell's environment. Only loopback
 `http://127.0.0.1` or `http://localhost` URLs are accepted; anything else is ignored. A local
 backend gets its own nickname and token in `~/.local/state/typarchy-dev/`, so your real
@@ -28,7 +28,7 @@ npx convex deploy
 npx convex run --prod wordSync:refresh
 ```
 
-Then set [`Config.js`](../Config.js) → `convexUrl` to the production deployment URL.
+Then set `CONVEX_URL` in [`bin/typarchy-api`](../bin/typarchy-api) to the production deployment URL.
 
 ## Moderation
 

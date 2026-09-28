@@ -1,7 +1,6 @@
 .pragma library
 
-// Convex deployment that holds the leaderboard.
-var convexUrl = "https://coordinated-crow-518.convex.cloud"
+// The leaderboard's Convex deployment is fixed in bin/typarchy-api (CONVEX_URL).
 
 // TYPARCHY_CONVEX_URL may point the game at a local backend (`npx convex dev`),
 // and only at one on this machine. A dev backend gets its own nickname token,

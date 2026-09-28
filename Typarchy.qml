@@ -18,8 +18,8 @@ Item {
   // A local dev backend (see Config.devUrl) gets its own state directory and token.
   readonly property string devUrl: Config.devUrl(Quickshell.env("TYPARCHY_CONVEX_URL"))
   readonly property bool devBackend: devUrl !== ""
-  readonly property string convexUrl: devBackend ? devUrl : Config.convexUrl
   readonly property string stateHelper: Qt.resolvedUrl("bin/typarchy-state").toString().replace(/^file:\/\//, "")
+  readonly property string apiHelper: Qt.resolvedUrl("bin/typarchy-api").toString().replace(/^file:\/\//, "")
 
   property bool opened: false
   // "board" shows the leaderboard instead of the game.
@@ -157,17 +157,17 @@ Item {
     Timer { repeat: false }
   }
 
-  // Api call with an abort-after timeout (QML's XMLHttpRequest has none).
+  // Convex calls go through bin/typarchy-api: fixed host (or loopback in dev),
+  // no redirects, the reply capped at 256 KiB while it is read. The request,
+  // token included, travels on stdin. timeoutMs is a hard deadline for the call.
   function request(kind, path, args, timeoutMs, callback) {
-    var watchdog = null
-    var xhr = Api.call(root.convexUrl, kind, path, args, function(error, value) {
-      if (watchdog) { watchdog.stop(); watchdog.destroy(); watchdog = null }
-      if (error && error.code === "UNKNOWN_PLAYER") root.forgetIdentity()
-      callback(error, value)
+    var command = [root.apiHelper].concat(root.devBackend ? ["--dev", root.devUrl] : [])
+    var input = JSON.stringify({ kind: kind, path: path, args: args || {} }) + "\n"
+    root.runHelper(command, input, 270000, timeoutMs, function(code, text) {
+      var reply = Api.parse(code, text)
+      if (reply.error && reply.error.code === "UNKNOWN_PLAYER") root.forgetIdentity()
+      callback(reply.error, reply.value)
     })
-    watchdog = watchdogComponent.createObject(root, { interval: timeoutMs })
-    watchdog.triggered.connect(function() { xhr.abort() })
-    watchdog.start()
   }
 
   function refreshBoard() {
@@ -267,50 +267,61 @@ Item {
   // Identity
   // ------------------------------------------------------------------
 
-  // State files are read and written only through bin/typarchy-state: it refuses
-  // symlinks and oversized files, creates everything 0600 in a 0700 directory,
-  // replaces files atomically and validates the schema. The token goes over stdin.
+  // Runs one of the bundled helpers with `input` on stdin, an absolute deadline
+  // and a cap on what it may print. callback(exitCode, stdout); exitCode is null
+  // when the helper was killed for running over either limit.
   Component {
-    id: stateProcComponent
+    id: helperComponent
     Process {
       id: proc
       property string buf: ""
-      property bool overflow: false
+      property int maxChars: 32768
+      property bool killed: false
       property string input: ""
       property var done: null
+      function kill() { proc.killed = true; proc.buf = ""; proc.signal(9) }
       stdinEnabled: true
       stdout: SplitParser {
         splitMarker: ""
         onRead: function(chunk) {
-          if (proc.overflow) return
+          if (proc.killed) return
           proc.buf += chunk
-          if (proc.buf.length > 32768) { proc.overflow = true; proc.buf = ""; proc.signal(9) }
+          if (proc.buf.length > proc.maxChars) proc.kill()
         }
       }
       onStarted: { write(proc.input); proc.input = "" }
       onExited: function(code) {
         var cb = proc.done
         proc.done = null
-        if (cb) cb(code === 0 && !proc.overflow, proc.buf)
+        if (cb) cb(proc.killed ? null : code, proc.buf)
         proc.destroy()
       }
     }
   }
 
-  function runState(args, input, callback) {
-    var watchdog = watchdogComponent.createObject(root, { interval: 5000 })
-    var proc = stateProcComponent.createObject(root, {
-      command: ["/usr/bin/python3", "-I", "-S", root.stateHelper].concat(args, root.devBackend ? ["--dev"] : []),
+  function runHelper(command, input, maxChars, timeoutMs, callback) {
+    var watchdog = watchdogComponent.createObject(root, { interval: timeoutMs })
+    var proc = helperComponent.createObject(root, {
+      command: ["/usr/bin/python3", "-I", "-S"].concat(command),
       input: input,
-      done: function(ok, text) {
+      maxChars: maxChars,
+      done: function(code, text) {
         watchdog.stop()
         watchdog.destroy()
-        callback(ok, text)
+        callback(code, text)
       }
     })
-    watchdog.triggered.connect(function() { proc.signal(9) })
+    watchdog.triggered.connect(function() { proc.kill() })
     watchdog.start()
     proc.running = true
+  }
+
+  // State files are read and written only through bin/typarchy-state: it refuses
+  // symlinks and oversized files, creates everything 0600 in a 0700 directory,
+  // replaces files atomically and validates the schema. The token goes over stdin.
+  function runState(args, input, callback) {
+    var command = [root.stateHelper].concat(args, root.devBackend ? ["--dev"] : [])
+    root.runHelper(command, input, 32768, 5000, function(code, text) { callback(code === 0, text) })
   }
 
   function readState(kind, callback) {

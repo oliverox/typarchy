@@ -1,0 +1,81 @@
+#!/usr/bin/python3 -I
+"""Call a Convex function for Typarchy with hard bounds.
+
+    typarchy-api [--dev http://127.0.0.1:PORT]
+
+Reads one JSON line on stdin: {"kind": "query"|"mutation", "path": "...", "args": {...}}.
+Prints the HTTP status on the first line and the response body after it, or
+exits 3 when the server can't be reached. The body is read at most
+MAX_RESPONSE + 1 bytes and rejected past that, before anything else sees it.
+Redirects are refused and proxy environment variables ignored, so the request
+(and the token inside it) only goes to the fixed deployment or to loopback.
+"""
+import json
+import re
+import sys
+import urllib.error
+import urllib.request
+
+CONVEX_URL = "https://coordinated-crow-518.convex.cloud"
+DEV_URL = re.compile(r"http://(127\.0\.0\.1|localhost)(:[0-9]{1,5})?/?")
+MAX_REQUEST = 1048576
+MAX_RESPONSE = 262144
+TIMEOUT = 8
+
+
+class NoRedirects(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *args, **kwargs):
+        return None
+
+
+def read_capped(stream):
+    body = stream.read(MAX_RESPONSE + 1)
+    if len(body) > MAX_RESPONSE:
+        raise OverflowError
+    return body
+
+
+def main(argv):
+    base = CONVEX_URL
+    if len(argv) == 3 and argv[1] == "--dev" and DEV_URL.fullmatch(argv[2]):
+        base = argv[2]
+    elif len(argv) != 1:
+        return 2
+
+    line = sys.stdin.buffer.readline(MAX_REQUEST + 1)
+    if len(line) > MAX_REQUEST:
+        return 2
+    request = json.loads(line)
+    if request.get("kind") not in ("query", "mutation") or not re.fullmatch(r"[A-Za-z0-9_]+:[A-Za-z0-9_]+", str(request.get("path"))):
+        return 2
+    payload = json.dumps({"path": request["path"], "args": request.get("args") or {}, "format": "json"}).encode()
+
+    opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirects())
+    req = urllib.request.Request(
+        base.rstrip("/") + "/api/" + request["kind"],
+        data=payload,
+        headers={"Content-Type": "application/json"},
+        method="POST",
+    )
+    try:
+        with opener.open(req, timeout=TIMEOUT) as resp:
+            status, body = resp.status, read_capped(resp)
+    except urllib.error.HTTPError as e:
+        # Convex reports function errors as 4xx/5xx with a JSON body; a refused
+        # redirect lands here too, with its 3xx status.
+        status, body = e.code, read_capped(e)
+    except OverflowError:
+        return 4
+    except (urllib.error.URLError, OSError):
+        return 3
+    sys.stdout.buffer.write(b"%d\n" % status + body)
+    return 0
+
+
+if __name__ == "__main__":
+    try:
+        sys.exit(main(sys.argv))
+    except OverflowError:
+        sys.exit(4)
+    except (ValueError, UnicodeDecodeError):
+        sys.exit(2)
