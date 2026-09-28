@@ -15,8 +15,11 @@ Item {
   property var manifest: null
 
   readonly property string pluginId: (manifest && manifest.id) || "typarchy.game"
-  readonly property string convexUrl: Quickshell.env("TYPARCHY_CONVEX_URL") || Config.convexUrl
-  readonly property string stateDir: (Quickshell.env("XDG_STATE_HOME") || Quickshell.env("HOME") + "/.local/state") + "/typarchy"
+  // A local dev backend (see Config.devUrl) gets its own state directory and token.
+  readonly property string devUrl: Config.devUrl(Quickshell.env("TYPARCHY_CONVEX_URL"))
+  readonly property bool devBackend: devUrl !== ""
+  readonly property string convexUrl: devBackend ? devUrl : Config.convexUrl
+  readonly property string stateHelper: Qt.resolvedUrl("bin/typarchy-state").toString().replace(/^file:\/\//, "")
 
   property bool opened: false
   // "board" shows the leaderboard instead of the game.
@@ -143,9 +146,7 @@ Item {
     else root.open("{}")
   }
 
-  Component.onCompleted: {
-    Quickshell.execDetached(["sh", "-c", "mkdir -p \"$1\" && chmod 700 \"$1\"", "sh", root.stateDir])
-  }
+  Component.onCompleted: root.loadState()
 
   // ------------------------------------------------------------------
   // Networking
@@ -174,11 +175,12 @@ Item {
     root.request("query", "leaderboard:top", { limit: 20 }, 8000, function(error, value) {
       root.boardLoading = false
       root.boardError = error ? error.message : ""
-      if (!error) root.topPlayers = value
+      if (!error) root.topPlayers = root.cleanBoard(value)
     })
     if (!root.playerToken) return
     root.request("query", "players:me", { token: root.playerToken }, 8000, function(error, value) {
-      if (!error && value) {
+      value = error ? null : root.cleanMe(value)
+      if (value) {
         root.me = value
         root.saveProfile()
         if (value.isAdmin) root.refreshPending()
@@ -189,7 +191,67 @@ Item {
 
   function refreshPending() {
     root.request("query", "moderation:pending", { token: root.playerToken }, 8000, function(error, value) {
-      if (!error) root.pendingRuns = value
+      if (!error) root.pendingRuns = root.cleanPending(value)
+    })
+  }
+
+  // ------------------------------------------------------------------
+  // Server replies: keep only the expected shape, with bounded sizes
+  // ------------------------------------------------------------------
+
+  function count(value, max) {
+    return Number.isInteger(value) && value >= 0 && value <= (max || 1e9) ? value : 0
+  }
+
+  function nickname(value) {
+    return typeof value === "string" && /^[A-Za-z0-9_-]{3,16}$/.test(value) ? value : "?"
+  }
+
+  function cleanWords(value, max) {
+    if (!Array.isArray(value)) return []
+    return value.slice(0, max).filter(function(w) { return typeof w === "string" && /^[a-z]{1,32}$/.test(w) })
+  }
+
+  function cleanBoard(value) {
+    if (!Array.isArray(value)) return []
+    return value.slice(0, 50).map(function(p) {
+      p = p || {}
+      return { rank: root.count(p.rank), name: root.nickname(p.name), score: root.count(p.score), words: root.count(p.words) }
+    })
+  }
+
+  function cleanMe(value) {
+    if (!value || typeof value !== "object") return null
+    var runs = Array.isArray(value.recentRuns) ? value.recentRuns.slice(0, 5) : []
+    return {
+      name: root.nickname(value.name),
+      bestScore: root.count(value.bestScore),
+      runCount: root.count(value.runCount),
+      rank: root.count(value.rank) || null,
+      isAdmin: value.isAdmin === true,
+      recentRuns: runs.map(function(r) {
+        r = r || {}
+        var status = r.status === "pending" || r.status === "rejected" ? r.status : "ranked"
+        return { score: root.count(r.score), words: root.count(r.words), playedAt: typeof r.playedAt === "number" && isFinite(r.playedAt) ? r.playedAt : 0, status: status }
+      })
+    }
+  }
+
+  function cleanPending(value) {
+    if (!Array.isArray(value)) return []
+    return value.slice(0, 100).filter(function(r) {
+      return r && typeof r.runId === "string" && /^[A-Za-z0-9]{1,64}$/.test(r.runId)
+    }).map(function(r) {
+      var st = r.stats && typeof r.stats === "object" ? r.stats : null
+      var number = function(n) { return typeof n === "number" && isFinite(n) ? n : 0 }
+      return {
+        runId: r.runId,
+        name: root.nickname(r.name),
+        score: root.count(r.score),
+        words: root.count(r.words),
+        flags: (Array.isArray(r.flags) ? r.flags.slice(0, 8) : []).map(function(f) { return Api.message(f, "?").slice(0, 60) }),
+        stats: st ? { msPerLetter: number(st.msPerLetter), medianReactionMs: number(st.medianReactionMs), typos: root.count(st.typos) } : null
+      }
     })
   }
 
@@ -205,33 +267,93 @@ Item {
   // Identity
   // ------------------------------------------------------------------
 
-  FileView {
-    id: identityFile
-    path: root.stateDir + "/identity.json"
-    atomicWrites: true
-    printErrors: false
-    onLoaded: {
-      try {
-        var data = JSON.parse(text())
-        root.playerName = String(data.name || "")
-        root.playerToken = String(data.token || "")
-      } catch (e) {}
-      root.finishIdentityLoad()
+  // State files are read and written only through bin/typarchy-state: it refuses
+  // symlinks and oversized files, creates everything 0600 in a 0700 directory,
+  // replaces files atomically and validates the schema. The token goes over stdin.
+  Component {
+    id: stateProcComponent
+    Process {
+      id: proc
+      property string buf: ""
+      property bool overflow: false
+      property string input: ""
+      property var done: null
+      stdinEnabled: true
+      stdout: SplitParser {
+        splitMarker: ""
+        onRead: function(chunk) {
+          if (proc.overflow) return
+          proc.buf += chunk
+          if (proc.buf.length > 32768) { proc.overflow = true; proc.buf = ""; proc.signal(9) }
+        }
+      }
+      onStarted: { write(proc.input); proc.input = "" }
+      onExited: function(code) {
+        var cb = proc.done
+        proc.done = null
+        if (cb) cb(code === 0 && !proc.overflow, proc.buf)
+        proc.destroy()
+      }
     }
-    onLoadFailed: root.finishIdentityLoad()
   }
 
-  FileView {
-    id: profileFile
-    path: root.stateDir + "/profile.json"
-    atomicWrites: true
-    printErrors: false
-    onLoaded: {
-      try {
-        var data = JSON.parse(text())
-        if (Array.isArray(data.practiceWords)) root.practiceWords = data.practiceWords
-      } catch (e) {}
-    }
+  function runState(args, input, callback) {
+    var watchdog = watchdogComponent.createObject(root, { interval: 5000 })
+    var proc = stateProcComponent.createObject(root, {
+      command: ["/usr/bin/python3", "-I", "-S", root.stateHelper].concat(args, root.devBackend ? ["--dev"] : []),
+      input: input,
+      done: function(ok, text) {
+        watchdog.stop()
+        watchdog.destroy()
+        callback(ok, text)
+      }
+    })
+    watchdog.triggered.connect(function() { proc.signal(9) })
+    watchdog.start()
+    proc.running = true
+  }
+
+  function readState(kind, callback) {
+    root.runState(["read", kind], "", function(ok, text) {
+      var data = null
+      if (ok) { try { data = JSON.parse(text) } catch (e) {} }
+      callback(data)
+    })
+  }
+
+  // One write per file at a time; a newer payload replaces a queued one.
+  property var stateWrites: ({})
+
+  function writeState(kind, doc) {
+    var q = root.stateWrites[kind] || (root.stateWrites[kind] = { busy: false, pending: null })
+    q.pending = JSON.stringify(doc) + "\n"
+    if (!q.busy) root.flushState(kind)
+  }
+
+  function flushState(kind) {
+    var q = root.stateWrites[kind]
+    if (q.pending === null) { q.busy = false; return }
+    var payload = q.pending
+    q.pending = null
+    q.busy = true
+    root.runState(["write", kind], payload, function(ok) {
+      if (!ok) console.warn("typarchy: couldn't save " + kind + ".json")
+      root.flushState(kind)
+    })
+  }
+
+  function loadState() {
+    root.readState("identity", function(data) {
+      if (data === null) root.notice = "Couldn't read your saved nickname; see the shell journal."
+      else if (data.token) {
+        root.playerName = data.name
+        root.playerToken = data.token
+      }
+      root.finishIdentityLoad()
+    })
+    root.readState("profile", function(data) {
+      if (data && data.practiceWords) root.practiceWords = data.practiceWords
+    })
   }
 
   function finishIdentityLoad() {
@@ -245,19 +367,19 @@ Item {
     root.playerName = ""
     root.playerToken = ""
     root.me = null
-    identityFile.setText("{}\n")
+    root.writeState("identity", {})
     root.saveProfile()
     if (root.phase !== "running") root.phase = "nickname"
   }
 
   // The bar widget watches this file for the best score and rank.
   function saveProfile() {
-    profileFile.setText(JSON.stringify({
+    root.writeState("profile", {
       name: root.playerName,
       bestScore: root.me ? root.me.bestScore : 0,
       rank: root.me ? root.me.rank : null,
       practiceWords: root.practiceWords
-    }) + "\n")
+    })
   }
 
   function registerNickname() {
@@ -275,9 +397,13 @@ Item {
         root.nicknameError = error.message
         return
       }
+      if (!value || !/^[A-Za-z0-9_-]{3,16}$/.test(value.name) || !/^[0-9a-f]{64}$/.test(value.token)) {
+        root.nicknameError = "Unexpected reply from the leaderboard."
+        return
+      }
       root.playerName = value.name
       root.playerToken = value.token
-      identityFile.setText(JSON.stringify({ name: value.name, token: value.token }) + "\n")
+      root.writeState("identity", { name: value.name, token: value.token })
       root.nicknameDraft = ""
       root.phase = "idle"
       root.refreshBoard()
@@ -309,12 +435,16 @@ Item {
     root.phase = "starting"
     root.request("mutation", "game:start", { token: root.playerToken }, 6000, function(error, value) {
       if (root.phase !== "starting") return
+      var words = error ? [] : root.cleanWords(value && value.words, 400)
+      if (!error && (words.length === 0 || typeof value.sessionId !== "string" || value.sessionId.length > 64)) {
+        error = { code: "BAD_REPLY", message: "Unexpected reply from the leaderboard.", offline: false }
+      }
       if (!error) {
         root.sessionId = value.sessionId
-        root.checkpointEvery = value.checkpointEvery
-        root.practiceWords = value.words
+        root.checkpointEvery = Math.max(1, Math.min(100, root.count(value.checkpointEvery) || 10))
+        root.practiceWords = words
         root.saveProfile()
-        root.beginRun(value.words, true)
+        root.beginRun(words, true)
       } else if (error.offline && root.practiceWords.length > 0) {
         root.notice = "Offline — practice run, not ranked"
         root.beginRun(root.shuffled(root.practiceWords), false)
@@ -410,8 +540,9 @@ Item {
   function sendCheckpoint(count, t) {
     var session = root.sessionId
     root.request("mutation", "game:checkpoint", { token: root.playerToken, sessionId: session, count: count, t: t }, 8000, function(error, value) {
-      if (error || session !== root.sessionId || value.words.length === 0) return
-      root.words = root.words.concat(value.words)
+      var extra = error ? [] : root.cleanWords(value && value.words, 400)
+      if (session !== root.sessionId || extra.length === 0 || root.words.length > 8000) return
+      root.words = root.words.concat(extra)
     })
   }
 
@@ -435,9 +566,15 @@ Item {
         root.submitError = error.message
         return
       }
-      root.submitResult = value
-      root.submitState = value.accepted ? "accepted" : "rejected"
-      if (!value.accepted) root.submitError = value.reason
+      value = value || {}
+      root.submitResult = {
+        pending: value.pending === true,
+        rank: root.count(value.rank) || null,
+        personalBest: root.count(value.personalBest),
+        isPersonalBest: value.isPersonalBest === true
+      }
+      root.submitState = value.accepted === true ? "accepted" : "rejected"
+      if (value.accepted !== true) root.submitError = Api.message(value.reason, "run rejected")
       root.refreshBoard()
     })
   }
@@ -522,7 +659,8 @@ Item {
   // UI
   // ------------------------------------------------------------------
 
-  component Label: Text {
+  // Small uppercase text. PlainText like every other Text here.
+  component Caption: Text {
     textFormat: Text.PlainText
     color: root.dim
     font.family: root.fontFamily
@@ -563,7 +701,7 @@ Item {
     property string value
     property color valueColor: root.foreground
     spacing: Style.spacing.xs
-    Label { text: parent.label }
+    Caption { text: parent.label }
     Text {
       textFormat: Text.PlainText
       text: parent.value
@@ -668,12 +806,12 @@ Item {
           Column {
             anchors { right: parent.right; verticalCenter: parent.verticalCenter }
             spacing: Style.spacing.xs
-            Label {
+            Caption {
               anchors.right: parent.right
               text: root.playerName ? root.playerName : "no nickname yet"
               color: root.playerName ? root.foreground : root.dim
             }
-            Label {
+            Caption {
               anchors.right: parent.right
               text: {
                 if (!root.me) return root.playerName ? "—" : ""
@@ -690,7 +828,7 @@ Item {
           spacing: Style.spacing.xxl
           Repeater {
             model: [{ id: "game", label: "survival" }, { id: "board", label: "leaderboard" }]
-            delegate: Label {
+            delegate: Caption {
               required property var modelData
               text: modelData.label
               color: root.view === modelData.id ? root.accent : root.dim
@@ -706,7 +844,7 @@ Item {
           color: root.faint
         }
 
-        Label {
+        Caption {
           id: footer
           anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter }
           text: {
@@ -775,7 +913,7 @@ Item {
                 font.pixelSize: Style.font.displayLarge * 1.4
                 font.bold: true
               }
-              Label {
+              Caption {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: root.registering ? "claiming…" : (root.nicknameError || "3–16 letters, digits, _ or -")
                 color: root.nicknameError ? root.urgent : root.dim
@@ -811,7 +949,7 @@ Item {
                 font.pixelSize: Style.font.heading
                 font.bold: true
               }
-              Label {
+              Caption {
                 visible: root.notice !== ""
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: root.notice
@@ -866,7 +1004,7 @@ Item {
                 }
               }
 
-              Label {
+              Caption {
                 visible: root.notice !== ""
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: root.notice
@@ -879,7 +1017,7 @@ Item {
               anchors.centerIn: parent
               width: parent.width
               spacing: Style.spacing.lg
-              Label {
+              Caption {
                 anchors.horizontalCenter: parent.horizontalCenter
                 text: "run terminated"
                 color: root.urgent
@@ -935,8 +1073,8 @@ Item {
               width: parent.width
               spacing: Style.spacing.sm
 
-              Label { text: "held for review"; color: root.urgent }
-              Label {
+              Caption { text: "held for review"; color: root.urgent }
+              Caption {
                 visible: root.reviewError !== ""
                 text: root.reviewError
                 color: root.urgent
@@ -994,9 +1132,9 @@ Item {
               Rectangle { width: parent.width; height: 1; color: root.faint }
             }
 
-            Label { text: "top typists worldwide" }
+            Caption { text: "top typists worldwide" }
 
-            Label {
+            Caption {
               visible: root.topPlayers.length === 0
               text: root.boardLoading ? "loading…" : (root.boardError || "no runs yet — be the first")
               color: root.boardError ? root.urgent : root.dim
@@ -1076,7 +1214,7 @@ Item {
             width: (parent.width - Style.spacing.huge * 2) * 0.42
             spacing: Style.spacing.md
 
-            Label { text: "you" }
+            Caption { text: "you" }
             Row {
               visible: !!root.me
               spacing: Style.spacing.huge
@@ -1084,7 +1222,7 @@ Item {
               Stat { label: "rank"; value: root.me && root.me.rank ? "#" + root.me.rank : "—" }
               Stat { label: "runs"; value: root.me ? String(root.me.runCount) : "0" }
             }
-            Label {
+            Caption {
               visible: !root.me
               text: root.playerName ? "loading…" : "pick a nickname to get ranked"
               font.capitalization: Font.MixedCase
@@ -1093,8 +1231,8 @@ Item {
             }
 
             Item { width: 1; height: Style.spacing.lg }
-            Label { text: "last runs"; visible: !!root.me }
-            Label {
+            Caption { text: "last runs"; visible: !!root.me }
+            Caption {
               visible: !!root.me && root.me.recentRuns.length === 0
               text: "no runs yet"
               font.capitalization: Font.MixedCase

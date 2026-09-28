@@ -51,15 +51,21 @@ omarchy restart shell
 The shell keeps Typarchy loaded, so the update only takes effect after the restart.
 Until then you're still playing the old version, and the leaderboard may refuse its runs.
 
-## Uninstall
+## Removing
 
 ```bash
 omarchy plugin remove typarchy.game
-rm -rf ~/.local/state/typarchy   # optional: forget your nickname token and cached words
 ```
 
-Removing the plugin doesn't delete your leaderboard entry. Remove any keybinding you added to
-`bindings.lua` yourself.
+What stays behind:
+
+- `~/.local/state/typarchy/` (0700): `identity.json` holds your nickname and its secret token,
+  `profile.json` your best score, rank and the words cached for offline practice. Both are
+  0600. Removing the plugin keeps them so you can reinstall without losing your nickname;
+  delete the two files yourself to forget them. `~/.local/state/typarchy-dev/` exists only if
+  you pointed the game at a local backend.
+- Your leaderboard entry. Removing the plugin doesn't delete it.
+- Any keybinding you added to `bindings.lua`; remove it yourself.
 
 ## Dependencies and network use
 
@@ -68,6 +74,10 @@ the Typarchy leaderboard, a [Convex](https://convex.dev) deployment (`Config.js`
 only your chosen nickname, its token, and run data: when each word was finished, how many
 typos it took, and the timing of the keys that typed it (so the server can tell people
 from scripts). Nothing else leaves your machine. Offline practice needs no network.
+
+The only files it writes are the two in `~/.local/state/typarchy/` (see Removing). They are
+read and written by `bin/typarchy-state` (Python standard library, run with the system
+`python3`), which refuses symlinks and oversized files and creates them 0600.
 
 The `backend/` folder is the server code. You don't need to install it to play.
 
@@ -97,7 +107,7 @@ the backend tests replay simulated runs through both to keep them identical.
 ## How ranking works
 
 - **Nicknames, no accounts.** Claiming a nickname returns a secret token stored in
-  `~/.local/state/typarchy/identity.json` (directory mode 700). Lose the file, lose the name.
+  `~/.local/state/typarchy/identity.json` (file mode 600, directory 700). Lose the file, lose the name.
 - **Server-run sessions.** The server starts each run and issues its words. The client
   checks in every 10 words (and receives more words), then submits per-word timestamps
   and typo counts. The server replays the run with the same rules, computes the score
