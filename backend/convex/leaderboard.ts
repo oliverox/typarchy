@@ -7,6 +7,7 @@ export const top = query({
     v.object({
       rank: v.number(),
       name: v.string(),
+      country: v.union(v.string(), v.null()),
       score: v.number(),
       words: v.number(),
     }),
@@ -21,6 +22,7 @@ export const top = query({
     return players.map((p, i) => ({
       rank: i + 1,
       name: p.name,
+      country: p.country ?? null,
       score: p.bestScore,
       words: p.bestWords,
     }));

@@ -12,6 +12,8 @@ export default defineSchema({
     // Can approve and reject held runs from the game. Only settable with
     // deploy access: `npx convex run --prod admin:setAdmin`.
     isAdmin: v.optional(v.boolean()),
+    // ISO 3166-1 alpha-2 code the player chose to show as a flag, if any.
+    country: v.optional(v.string()),
   })
     .index("by_nameKey", ["nameKey"])
     .index("by_tokenHash", ["tokenHash"])

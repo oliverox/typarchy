@@ -13,6 +13,7 @@ import type * as crons from "../crons.js";
 import type * as game from "../game.js";
 import type * as leaderboard from "../leaderboard.js";
 import type * as lib_auth from "../lib/auth.js";
+import type * as lib_countries from "../lib/countries.js";
 import type * as lib_humanity from "../lib/humanity.js";
 import type * as lib_rateLimit from "../lib/rateLimit.js";
 import type * as lib_review from "../lib/review.js";
@@ -33,6 +34,7 @@ declare const fullApi: ApiFromModules<{
   game: typeof game;
   leaderboard: typeof leaderboard;
   "lib/auth": typeof lib_auth;
+  "lib/countries": typeof lib_countries;
   "lib/humanity": typeof lib_humanity;
   "lib/rateLimit": typeof lib_rateLimit;
   "lib/review": typeof lib_review;

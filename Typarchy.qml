@@ -6,6 +6,7 @@ import qs.Commons
 import qs.Ui
 import "Api.js" as Api
 import "Config.js" as Config
+import "Countries.js" as Countries
 import "Rules.js" as Rules
 
 Item {
@@ -60,6 +61,15 @@ Item {
   // Held runs, fetched only for admins (the server refuses everyone else).
   property var pendingRuns: []
   property string reviewError: ""
+
+  // --- Country, shown as a flag next to the name ---
+  // Suggested from the system timezone (offline); the player confirms or
+  // changes it when claiming a nickname, or later with `c` on the leaderboard.
+  property string countryGuess: ""
+  property string countryDraft: ""
+  property bool countryEditing: false
+  property bool countrySaving: false
+  property string countryError: ""
 
   // --- Nickname entry ---
   property string nicknameDraft: ""
@@ -216,7 +226,13 @@ Item {
     if (!Array.isArray(value)) return []
     return value.slice(0, 50).map(function(p) {
       p = p || {}
-      return { rank: root.count(p.rank), name: root.nickname(p.name), score: root.count(p.score), words: root.count(p.words) }
+      return {
+        rank: root.count(p.rank),
+        name: root.nickname(p.name),
+        country: Countries.known(p.country) ? p.country : "",
+        score: root.count(p.score),
+        words: root.count(p.words)
+      }
     })
   }
 
@@ -228,6 +244,7 @@ Item {
       bestScore: root.count(value.bestScore),
       runCount: root.count(value.runCount),
       rank: root.count(value.rank) || null,
+      country: Countries.known(value.country) ? value.country : "",
       isAdmin: value.isAdmin === true,
       recentRuns: runs.map(function(r) {
         r = r || {}
@@ -365,6 +382,13 @@ Item {
     root.readState("profile", function(data) {
       if (data && data.practiceWords) root.practiceWords = data.practiceWords
     })
+    root.runHelper([root.stateHelper, "timezone-country"], "", 4096, 5000, function(code, text) {
+      var data = null
+      if (code === 0) { try { data = JSON.parse(text) } catch (e) {} }
+      if (!data || !Countries.known(data.country)) return
+      root.countryGuess = data.country
+      if (!root.countryDraft) root.countryDraft = data.country
+    })
   }
 
   function finishIdentityLoad() {
@@ -402,7 +426,9 @@ Item {
     }
     root.registering = true
     root.nicknameError = ""
-    root.request("mutation", "players:register", { name: name }, 8000, function(error, value) {
+    var args = { name: name }
+    if (Countries.known(root.countryDraft)) args.country = root.countryDraft
+    root.request("mutation", "players:register", args, 8000, function(error, value) {
       root.registering = false
       if (error) {
         root.nicknameError = error.message
@@ -419,6 +445,72 @@ Item {
       root.phase = "idle"
       root.refreshBoard()
     })
+  }
+
+  function countryLabel(code) {
+    return Countries.known(code) ? Countries.flag(code) + "  " + Countries.name(code) : "no flag"
+  }
+
+  // One step through the list, or to the next/previous initial letter with
+  // shift. "No flag" sits before the first country.
+  function stepCountry(code, step, byLetter) {
+    var n = Countries.list.length
+    var i = Countries.indexOf(code)
+    if (!byLetter) {
+      i += step
+      if (i < -1) i = n - 1
+      if (i >= n) i = -1
+      return i < 0 ? "" : Countries.list[i][0]
+    }
+    var initial = function(j) { return j < 0 ? "" : Countries.list[j][1].charAt(0) }
+    var here = initial(i)
+    var j
+    if (step > 0) {
+      j = i + 1
+      while (j < n && initial(j) === here) j++
+      return j >= n ? "" : Countries.list[j][0]
+    }
+    j = i < 0 ? n - 1 : i - 1
+    if (j < 0) return ""
+    var prev = initial(j)
+    while (j > 0 && initial(j - 1) === prev) j--
+    return Countries.list[j][0]
+  }
+
+  function editCountry() {
+    if (!root.me) return
+    root.countryDraft = root.me.country || root.countryGuess
+    root.countryError = ""
+    root.countryEditing = true
+  }
+
+  function saveCountry() {
+    if (root.countrySaving) return
+    root.countrySaving = true
+    root.countryError = ""
+    var country = Countries.known(root.countryDraft) ? root.countryDraft : null
+    root.request("mutation", "players:setCountry", { token: root.playerToken, country: country }, 8000, function(error) {
+      root.countrySaving = false
+      if (error) {
+        root.countryError = error.code === "RATE_LIMITED" || error.code === "BAD_COUNTRY"
+          ? error.message : "Couldn't save your country. Try again in a moment."
+        return
+      }
+      root.countryEditing = false
+      root.refreshBoard()
+    })
+  }
+
+  // Country name under a hovered flag on the leaderboard.
+  function showFlagTip(item, text) {
+    if (!text) {
+      flagTip.text = ""
+      return
+    }
+    flagTip.text = text
+    var p = item.mapToItem(boardView, item.width / 2, item.height)
+    flagTip.x = Math.max(0, Math.min(boardView.width - flagTip.width, p.x - flagTip.width / 2))
+    flagTip.y = p.y + Style.spacing.xs
   }
 
   // ------------------------------------------------------------------
@@ -615,6 +707,7 @@ Item {
 
     if (key === Qt.Key_Escape) {
       if (root.phase === "running" || root.phase === "starting") root.abandonRun()
+      else if (root.countryEditing) root.countryEditing = false
       else if (root.view === "board") root.view = "game"
       else root.dismiss()
       return true
@@ -634,14 +727,26 @@ Item {
 
     if (key === Qt.Key_Tab || key === Qt.Key_Backtab) {
       if (root.phase !== "starting") {
+        root.countryEditing = false
         root.view = root.view === "board" ? "game" : "board"
         if (root.view === "board") root.refreshBoard()
       }
       return true
     }
 
+    var shift = (event.modifiers & Qt.ShiftModifier) !== 0
     if (root.view === "board") {
-      if (key === Qt.Key_R && !ctrl) root.refreshBoard()
+      if (root.countryEditing) {
+        if (key === Qt.Key_Left || key === Qt.Key_Right) {
+          root.countryDraft = root.stepCountry(root.countryDraft, key === Qt.Key_Right ? 1 : -1, shift)
+          root.countryError = ""
+        } else if (key === Qt.Key_Return || key === Qt.Key_Enter) {
+          root.saveCountry()
+        }
+        return true
+      }
+      if (key === Qt.Key_C && !ctrl && root.me) root.editCountry()
+      else if (key === Qt.Key_R && !ctrl) root.refreshBoard()
       else if (key === Qt.Key_Return || key === Qt.Key_Enter) root.startRun()
       return true
     }
@@ -649,6 +754,8 @@ Item {
     if (root.phase === "nickname") {
       if (key === Qt.Key_Return || key === Qt.Key_Enter) {
         root.registerNickname()
+      } else if (key === Qt.Key_Left || key === Qt.Key_Right) {
+        root.countryDraft = root.stepCountry(root.countryDraft, key === Qt.Key_Right ? 1 : -1, shift)
       } else if (key === Qt.Key_Backspace) {
         root.nicknameDraft = root.nicknameDraft.slice(0, -1)
         root.nicknameError = ""
@@ -860,8 +967,9 @@ Item {
           anchors { bottom: parent.bottom; horizontalCenter: parent.horizontalCenter }
           text: {
             if (root.phase === "running") return "esc abandon run"
-            if (root.view === "board") return "enter play · r refresh · tab survival · esc back"
-            if (root.phase === "nickname") return "enter claim nickname · tab leaderboard · esc close"
+            if (root.view === "board" && root.countryEditing) return "← → country · shift+← → by letter · enter save · esc cancel"
+            if (root.view === "board") return "enter play · r refresh" + (root.me ? " · c country" : "") + " · tab survival · esc back"
+            if (root.phase === "nickname") return "enter claim nickname · ← → country · tab leaderboard · esc close"
             return "enter play · tab leaderboard · esc close"
           }
         }
@@ -923,6 +1031,15 @@ Item {
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.displayLarge * 1.4
                 font.bold: true
+              }
+              Text {
+                width: parent.width
+                horizontalAlignment: Text.AlignHCenter
+                textFormat: Text.PlainText
+                text: "◂  " + root.countryLabel(root.countryDraft) + "  ▸"
+                color: root.countryDraft ? root.foreground : root.dim
+                font.family: root.fontFamily
+                font.pixelSize: Style.font.title
               }
               Caption {
                 anchors.horizontalCenter: parent.horizontalCenter
@@ -1070,6 +1187,29 @@ Item {
         Item {
           id: boardView
           visible: root.view === "board"
+          onVisibleChanged: flagTip.text = ""
+
+          Rectangle {
+            id: flagTip
+            property string text: ""
+            visible: text !== ""
+            z: 100
+            width: flagTipText.implicitWidth + Style.spacing.md * 2
+            height: flagTipText.implicitHeight + Style.spacing.xs * 2
+            radius: root.cornerRadius
+            color: root.background
+            border.color: root.border
+            border.width: 1
+            Text {
+              id: flagTipText
+              anchors.centerIn: parent
+              textFormat: Text.PlainText
+              text: flagTip.text
+              color: root.foreground
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.bodySmall
+            }
+          }
           anchors { top: rule.bottom; topMargin: Style.spacing.xxl; bottom: footer.top; bottomMargin: Style.spacing.lg; left: parent.left; right: parent.right }
 
           Column {
@@ -1181,14 +1321,37 @@ Item {
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.body
                   }
-                  Text {
+                  // Flag and name as one unit, the flag just before the name.
+                  Row {
                     width: parent.width - Style.space(28) - Style.space(44) - Style.space(64) - Style.spacing.lg * 3
-                    textFormat: Text.PlainText
-                    elide: Text.ElideRight
-                    text: modelData.name
-                    color: parent.parent.isMe ? root.accent : root.foreground
-                    font.family: root.fontFamily
-                    font.pixelSize: Style.font.body
+                    spacing: Style.spacing.sm
+                    Text {
+                      id: flagText
+                      // Centred on the name's line, nudged down: the emoji font
+                      // sits higher than the text font.
+                      anchors.verticalCenter: nameText.verticalCenter
+                      anchors.verticalCenterOffset: Style.space(1)
+                      width: Style.space(16)
+                      textFormat: Text.PlainText
+                      text: Countries.flag(modelData.country)
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                      MouseArea {
+                        anchors.fill: parent
+                        hoverEnabled: true
+                        onContainsMouseChanged: root.showFlagTip(flagText, containsMouse ? Countries.name(modelData.country) : "")
+                      }
+                    }
+                    Text {
+                      id: nameText
+                      width: parent.width - flagText.width - parent.spacing
+                      textFormat: Text.PlainText
+                      elide: Text.ElideRight
+                      text: modelData.name
+                      color: parent.parent.parent.isMe ? root.accent : root.foreground
+                      font.family: root.fontFamily
+                      font.pixelSize: Style.font.body
+                    }
                   }
                   Text {
                     width: Style.space(44)
@@ -1226,6 +1389,26 @@ Item {
             spacing: Style.spacing.md
 
             Caption { text: "you" }
+            Text {
+              visible: !!root.me
+              textFormat: Text.PlainText
+              text: root.countryEditing
+                ? "◂  " + root.countryLabel(root.countryDraft) + "  ▸" + (root.countrySaving ? "  saving…" : "")
+                : root.countryLabel(root.me ? root.me.country : "")
+              color: root.countryEditing ? root.accent : root.dim
+              font.family: root.fontFamily
+              font.pixelSize: Style.font.body
+            }
+            Caption {
+              visible: root.countryError !== ""
+              width: parent.width
+              elide: Text.ElideRight
+              text: root.countryError
+              color: root.urgent
+              font.capitalization: Font.MixedCase
+              font.letterSpacing: 0
+              font.pixelSize: Style.font.bodySmall
+            }
             Row {
               visible: !!root.me
               spacing: Style.spacing.huge

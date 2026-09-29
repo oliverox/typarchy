@@ -3,6 +3,7 @@
 
     typarchy-state read  identity|profile [--dev]   prints the file's JSON (or {})
     typarchy-state write identity|profile [--dev]   reads one JSON line on stdin
+    typarchy-state timezone-country                 {"country": "MU"} or {}
 
 Files live in ~/.local/state/typarchy (typarchy-dev with --dev), 0700 directory,
 0600 files. Every open is O_NOFOLLOW relative to a held directory descriptor,
@@ -151,7 +152,37 @@ def clean(kind, doc):
     return {"name": name, "bestScore": best, "rank": rank, "practiceWords": words}
 
 
+def timezone_country():
+    """The country of the system timezone, from tzdata alone (no network).
+
+    /etc/localtime links into /usr/share/zoneinfo; zone.tab maps the zone to
+    its ISO 3166 code. Only a suggestion: the player confirms it."""
+    try:
+        target = os.readlink("/etc/localtime")
+    except OSError:
+        return None
+    zone = target.split("zoneinfo/", 1)[-1]
+    if not re.fullmatch(r"[A-Za-z0-9_+-]+(/[A-Za-z0-9_+-]+){0,2}", zone):
+        return None
+    fd = os.open("/usr/share/zoneinfo/zone.tab", os.O_RDONLY | os.O_NOFOLLOW | os.O_CLOEXEC)
+    try:
+        data = os.read(fd, 65537)
+    finally:
+        os.close(fd)
+    if len(data) > 65536:
+        return None
+    for line in data.decode("utf-8", "replace").splitlines():
+        cols = line.split("\t")
+        if len(cols) >= 3 and not line.startswith("#") and cols[2] == zone and re.fullmatch(r"[A-Z]{2}", cols[0]):
+            return cols[0]
+    return None
+
+
 def main(argv):
+    if argv[1:] == ["timezone-country"]:
+        code = timezone_country()
+        sys.stdout.write(json.dumps({"country": code} if code else {}) + "\n")
+        return 0
     if len(argv) not in (3, 4) or argv[1] not in ("read", "write") or argv[2] not in ("identity", "profile"):
         print("usage: typarchy-state read|write identity|profile [--dev]", file=sys.stderr)
         return 2

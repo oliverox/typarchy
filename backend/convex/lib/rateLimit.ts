@@ -9,6 +9,8 @@ export const RUN_STARTS: Limit = { capacity: 30, perHour: 60 };
 // Claiming nicknames, across everyone: the server can't tell callers apart, so
 // this caps how fast a script can mint fresh players.
 export const NICKNAME_CLAIMS: Limit = { capacity: 20, perHour: 20 };
+// Changing the flag, per player: plenty for fixing a mistake.
+export const COUNTRY_CHANGES: Limit = { capacity: 10, perHour: 10 };
 
 export async function consume(ctx: MutationCtx, key: string, limit: Limit): Promise<void> {
   const now = Date.now();

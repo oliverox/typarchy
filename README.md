@@ -71,7 +71,7 @@ What stays behind:
 
 Typarchy needs no extra packages beyond Omarchy's shell. The ranked mode talks over HTTPS to
 the Typarchy leaderboard, a [Convex](https://convex.dev) deployment (fixed in `bin/typarchy-api`). It sends
-only your chosen nickname, its token, and run data: when each word was finished, how many
+only your chosen nickname, its token, the country you picked for your flag (if any), and run data: when each word was finished, how many
 typos it took, and the timing of the keys that typed it (so the server can tell people
 from scripts). Nothing else leaves your machine. Offline practice needs no network.
 
@@ -110,6 +110,11 @@ the backend tests replay simulated runs through both to keep them identical.
 
 - **Nicknames, no accounts.** Claiming a nickname returns a secret token stored in
   `~/.local/state/typarchy/identity.json` (file mode 600, directory 700). Lose the file, lose the name.
+- **Flags.** When you claim a nickname the game suggests a country from your system
+  timezone (read from tzdata on your machine, no network lookup). Change it with ← →
+  or pick "no flag" before you confirm; press `c` on the leaderboard to change it later.
+  Only the two-letter code is stored, and it shows as a flag next to your name, with the
+  country's name on hover.
 - **Server-run sessions.** The server starts each run and issues its words. The client
   checks in every 10 words (and receives more words), then submits per-word timestamps
   and typo counts. The server replays the run with the same rules, computes the score

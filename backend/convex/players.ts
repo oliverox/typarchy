@@ -2,14 +2,24 @@ import { ConvexError, v } from "convex/values";
 import { mutation, query } from "./_generated/server";
 import type { QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
-import { findPlayer, hashToken, newToken } from "./lib/auth";
-import { consume, NICKNAME_CLAIMS } from "./lib/rateLimit";
+import { findPlayer, hashToken, newToken, requirePlayer } from "./lib/auth";
+import { COUNTRY_CODES } from "./lib/countries";
+import { consume, COUNTRY_CHANGES, NICKNAME_CLAIMS } from "./lib/rateLimit";
 
 const NAME_PATTERN = /^[A-Za-z0-9_-]{3,16}$/;
 const RANK_SCAN_LIMIT = 10_000;
 
+// A known country code, or undefined for "no flag". Anything else is refused.
+function checkCountry(country: string | null | undefined): string | undefined {
+  if (country === null || country === undefined || country === "") return undefined;
+  if (!COUNTRY_CODES.has(country)) {
+    throw new ConvexError({ code: "BAD_COUNTRY", message: "Unknown country." });
+  }
+  return country;
+}
+
 export const register = mutation({
-  args: { name: v.string() },
+  args: { name: v.string(), country: v.optional(v.string()) },
   returns: v.object({ name: v.string(), token: v.string() }),
   handler: async (ctx, args) => {
     const name = args.name.trim();
@@ -19,6 +29,7 @@ export const register = mutation({
         message: "Nicknames are 3–16 letters, digits, _ or -.",
       });
     }
+    const country = checkCountry(args.country);
     const nameKey = name.toLowerCase();
     const taken = await ctx.db
       .query("players")
@@ -40,6 +51,7 @@ export const register = mutation({
       bestScore: 0,
       bestWords: 0,
       runCount: 0,
+      ...(country ? { country } : {}),
     });
     return { name, token };
   },
@@ -56,6 +68,19 @@ export async function rankFor(ctx: QueryCtx, player: Doc<"players">) {
   return above.length + 1;
 }
 
+// The flag a player shows next to their name, or none.
+export const setCountry = mutation({
+  args: { token: v.string(), country: v.union(v.string(), v.null()) },
+  returns: v.union(v.string(), v.null()),
+  handler: async (ctx, args) => {
+    const player = await requirePlayer(ctx, args.token);
+    const country = checkCountry(args.country);
+    await consume(ctx, `country:${player._id}`, COUNTRY_CHANGES);
+    await ctx.db.patch("players", player._id, { country });
+    return country ?? null;
+  },
+});
+
 export const me = query({
   args: { token: v.string() },
   returns: v.union(
@@ -65,6 +90,7 @@ export const me = query({
       bestScore: v.number(),
       runCount: v.number(),
       rank: v.union(v.number(), v.null()),
+      country: v.union(v.string(), v.null()),
       isAdmin: v.boolean(),
       recentRuns: v.array(
         v.object({
@@ -90,6 +116,7 @@ export const me = query({
       bestScore: player.bestScore,
       runCount: player.runCount,
       rank: await rankFor(ctx, player),
+      country: player.country ?? null,
       isAdmin: player.isAdmin === true,
       recentRuns: runs.map((r) => ({
         score: r.score,
