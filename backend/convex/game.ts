@@ -5,7 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requirePlayer } from "./lib/auth";
 import { analyze, OLD_CLIENT_REASON } from "./lib/humanity";
 import { consume, RUN_STARTS } from "./lib/rateLimit";
-import { replay } from "./lib/rules";
+import { replay, tooFastWords, type FastWord } from "./lib/rules";
 import { rankFor } from "./players";
 
 const INITIAL_WORDS = 150;
@@ -31,9 +31,20 @@ const SESSION_TTL_MS = 6 * 60 * 60 * 1000;
 // the deployment logs, so nobody learns which one to work around.
 const BOT_REASON = "detected as a bot typing";
 
-function botDetected(reason: string) {
-  console.log(`run rejected as scripted: ${reason}`);
+function botDetected(player: Doc<"players">, reason: string) {
+  console.log(`run by ${player.name} rejected as scripted: ${reason}`);
   return { ok: false as const, reason: BOT_REASON };
+}
+
+// More words than this under the speed floor and the run is rejected. One is
+// held for review instead: a single word can come out too fast from a timing
+// hiccup on the player's machine (a real player was rejected this way).
+const FORGIVEN_FAST_WORDS = 1;
+
+function describeFast(fast: FastWord[]): string {
+  return fast
+    .map((f) => `word ${f.index} "${f.word}" in ${Math.round(f.ms)}ms (floor ${f.minimumMs}ms)`)
+    .join(", ");
 }
 
 // Once the board is this busy, a run entering the top 10 is held for review.
@@ -163,7 +174,7 @@ export const submit = mutation({
     // Sessions are single-use whatever the verdict.
     await ctx.db.delete("sessions", session._id);
 
-    const verdict = verify(session, args.events, Date.now());
+    const verdict = verify(player, session, args.events, Date.now());
     if (!verdict.ok) {
       return { accepted: false as const, reason: verdict.reason };
     }
@@ -234,14 +245,19 @@ async function boardFlags(ctx: MutationCtx, score: number): Promise<string[]> {
 }
 
 function verify(
+  player: Doc<"players">,
   session: Doc<"sessions">,
   events: { t: number; typos: number; keys?: number[] }[],
   now: number,
 ) {
   const result = replay(session.words, events);
-  if (!result.ok) return botDetected(result.reason);
+  if (!result.ok) return botDetected(player, result.reason);
+  const fast = tooFastWords(session.words, events);
+  if (fast.length > FORGIVEN_FAST_WORDS) {
+    return botDetected(player, `typed impossibly fast: ${describeFast(fast)}`);
+  }
   const human = analyze(session.words, events);
-  if (!human.ok) return human.reason === OLD_CLIENT_REASON ? human : botDetected(human.reason);
+  if (!human.ok) return human.reason === OLD_CLIENT_REASON ? human : botDetected(player, human.reason);
 
   const elapsed = now - session.startedAt;
   const lagOk = (lag: number) => lag >= MIN_LAG_MS && lag <= MAX_LAG_MS;
@@ -253,7 +269,7 @@ function verify(
   for (const cp of session.checkpoints) {
     if (cp.count < 1 || cp.count > events.length) continue;
     if (Math.abs(events[cp.count - 1].t - cp.t) > 1) {
-      return botDetected(`checkpoint ${cp.count} doesn't match the run`);
+      return botDetected(player, `checkpoint ${cp.count} doesn't match the run`);
     }
     if (!lagOk(cp.at - session.startedAt - cp.t)) {
       return { ok: false as const, reason: `run was paused around word ${cp.count}` };
@@ -265,7 +281,12 @@ function verify(
     return { ok: false as const, reason: "too many checkpoints never reached the server" };
   }
 
-  return { ...result, stats: human.stats, flags: human.flags };
+  const flags = [...human.flags];
+  if (fast.length > 0) {
+    console.log(`run by ${player.name} has a word under the speed floor: ${describeFast(fast)}`);
+    flags.push("too-fast word");
+  }
+  return { ...result, stats: human.stats, flags };
 }
 
 export const expireSessions = internalMutation({

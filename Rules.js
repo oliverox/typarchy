@@ -46,8 +46,6 @@ function replay(words, events) {
     var word = words[i]
     if (!isFinite(t) || Math.floor(typos) !== typos || typos < 0)
       return { ok: false, reason: "malformed event " + i }
-    if (t - wordStart < minimumWordMs(word))
-      return { ok: false, reason: "word " + i + " typed impossibly fast" }
     var end = deadline(wordStart, windowMs)
     if (t > end) return { ok: false, reason: "word " + i + " finished after the clock ran out" }
 

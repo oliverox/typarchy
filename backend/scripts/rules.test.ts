@@ -91,11 +91,23 @@ test("typos cost the streak but never time", () => {
 test("rejects impossible runs", () => {
   const words = ["comet", "harbor"];
   assert.equal(server.replay(words, [{ t: 4300, typos: 0 }]).ok, false, "after the clock");
-  assert.equal(server.replay(words, [{ t: 100, typos: 0 }]).ok, false, "too fast");
-  // comet needs 150ms to react plus 4 × 35ms for the other letters.
-  assert.equal(server.replay(words, [{ t: 289, typos: 0 }]).ok, false, "just under the floor");
-  assert.equal(server.replay(words, [{ t: 290, typos: 0 }]).ok, true, "at the floor");
   assert.equal(plugin.minimumWordMs("comet"), server.minimumWordMs("comet"));
   assert.equal(server.replay(words, [{ t: 1000, typos: 0 }, { t: 2000, typos: 0 }, { t: 3000, typos: 0 }]).ok, false, "unissued words");
   assert.equal(server.replay(words, [{ t: 1000, typos: -1 }]).ok, false, "negative typos");
+});
+
+test("finds words typed under the speed floor", () => {
+  const words = ["comet", "harbor", "zinc"];
+  // comet needs 150ms to react plus 4 × 35ms for the other letters.
+  assert.deepEqual(server.tooFastWords(words, [{ t: 290, typos: 0 }]), [], "at the floor");
+  assert.deepEqual(server.tooFastWords(words, [{ t: 289, typos: 0 }]), [
+    { index: 0, word: "comet", ms: 289, minimumMs: 290 },
+  ], "just under the floor");
+  // Each word is timed from the one before it, not from the start.
+  const fast = server.tooFastWords(words, [
+    { t: 1000, typos: 0 },
+    { t: 1100, typos: 0 },
+    { t: 2000, typos: 0 },
+  ]);
+  assert.deepEqual(fast.map((f) => f.index), [1]);
 });

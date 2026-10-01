@@ -63,9 +63,6 @@ export function replay(
     if (!Number.isFinite(t) || !Number.isInteger(typos) || typos < 0) {
       return { ok: false, reason: `malformed event ${i}` };
     }
-    if (t - wordStart < minimumWordMs(word)) {
-      return { ok: false, reason: `word ${i} typed impossibly fast` };
-    }
     const deadline = wordStart + windowMs;
     if (t > deadline) {
       return { ok: false, reason: `word ${i} finished after the clock ran out` };
@@ -79,4 +76,22 @@ export function replay(
   }
 
   return { ok: true, score, words: events.length, bestStreak, endT: wordStart + windowMs };
+}
+
+export type FastWord = { index: number; word: string; ms: number; minimumMs: number };
+
+// Words finished sooner after the previous one than anyone can read and type
+// them. Kept out of replay so the server can decide how many to forgive: one
+// can be a timing hiccup on the player's machine, a habit of it can't.
+// Expects events that replay accepted.
+export function tooFastWords(words: readonly string[], events: readonly WordEvent[]): FastWord[] {
+  const fast: FastWord[] = [];
+  let wordStart = 0;
+  for (let i = 0; i < events.length; i++) {
+    const ms = events[i].t - wordStart;
+    const minimumMs = minimumWordMs(words[i]);
+    if (ms < minimumMs) fast.push({ index: i, word: words[i], ms, minimumMs });
+    wordStart = events[i].t;
+  }
+  return fast;
 }
