@@ -233,7 +233,9 @@ Item {
         name: root.nickname(p.name),
         country: Countries.known(p.country) ? p.country : "",
         score: root.count(p.score),
-        words: root.count(p.words)
+        words: root.count(p.words),
+        // 0 when the server has no speed for that best run.
+        wpm: root.count(p.wpm, 1000)
       }
     })
   }
@@ -1325,7 +1327,7 @@ Item {
                   }
                   // Flag and name as one unit, the flag just before the name.
                   Row {
-                    width: parent.width - Style.space(28) - Style.space(44) - Style.space(64) - Style.spacing.lg * 3
+                    width: parent.width - Style.space(28) - Style.space(44) - Style.space(56) - Style.space(64) - Style.spacing.lg * 4
                     spacing: Style.spacing.sm
                     Text {
                       id: flagText
@@ -1360,6 +1362,15 @@ Item {
                     horizontalAlignment: Text.AlignRight
                     textFormat: Text.PlainText
                     text: modelData.words + "w"
+                    color: root.dim
+                    font.family: root.fontFamily
+                    font.pixelSize: Style.font.bodySmall
+                  }
+                  Text {
+                    width: Style.space(56)
+                    horizontalAlignment: Text.AlignRight
+                    textFormat: Text.PlainText
+                    text: modelData.wpm > 0 ? modelData.wpm + " wpm" : ""
                     color: root.dim
                     font.family: root.fontFamily
                     font.pixelSize: Style.font.bodySmall

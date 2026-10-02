@@ -118,3 +118,10 @@ export function analyze(words: readonly string[], events: readonly KeyedEvent[])
 
   return { ok: true, stats, flags };
 }
+
+// Words per minute from a run's keystroke pace, at the usual five letters a
+// word. Reading each new word isn't counted, as in a typing test where the
+// next word is already on screen.
+export function wpm(stats: Pick<RunStats, "msPerLetter"> | undefined): number | undefined {
+  return stats && stats.msPerLetter > 0 ? Math.round(60000 / (5 * stats.msPerLetter)) : undefined;
+}

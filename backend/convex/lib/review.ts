@@ -1,6 +1,7 @@
 import { v } from "convex/values";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
+import { wpm } from "./humanity";
 
 export const pendingRow = v.object({
   runId: v.id("runs"),
@@ -76,7 +77,11 @@ export async function reviewRun(
     }
     const player = await ctx.db.get("players", run.playerId);
     if (player && run.score > player.bestScore) {
-      await ctx.db.patch("players", player._id, { bestScore: run.score, bestWords: run.words });
+      await ctx.db.patch("players", player._id, {
+        bestScore: run.score,
+        bestWords: run.words,
+        bestWpm: wpm(run.stats),
+      });
     }
   }
   return null;

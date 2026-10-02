@@ -8,6 +8,9 @@ export default defineSchema({
     tokenHash: v.string(),
     bestScore: v.number(),
     bestWords: v.number(),
+    // Typing speed of the best run (see lib/humanity.ts wpm). Missing for
+    // bests set before runs kept keystroke stats.
+    bestWpm: v.optional(v.number()),
     runCount: v.number(),
     // Can approve and reject held runs from the game. Only settable with
     // deploy access: `npx convex run --prod admin:setAdmin`.

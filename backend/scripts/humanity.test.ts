@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { analyze, OLD_CLIENT_REASON, type KeyedEvent } from "../convex/lib/humanity.ts";
+import { analyze, OLD_CLIENT_REASON, wpm, type KeyedEvent } from "../convex/lib/humanity.ts";
 
 function mulberry32(seed: number) {
   return () => {
@@ -140,4 +140,12 @@ test("keystrokes must match the run", () => {
   for (const [name, events] of Object.entries(broken)) {
     assert.equal(analyze(words, events).ok, false, name);
   }
+});
+
+test("wpm from keystroke pace", () => {
+  // 120ms a letter is 600ms for a five-letter word: 100 a minute.
+  assert.equal(wpm({ msPerLetter: 120 }), 100);
+  assert.equal(wpm({ msPerLetter: 191.5 }), 63);
+  assert.equal(wpm({ msPerLetter: 0 }), undefined, "no later letters");
+  assert.equal(wpm(undefined), undefined, "no stats");
 });

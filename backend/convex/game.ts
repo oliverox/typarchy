@@ -3,7 +3,7 @@ import { internalMutation, mutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requirePlayer } from "./lib/auth";
-import { analyze, OLD_CLIENT_REASON } from "./lib/humanity";
+import { analyze, OLD_CLIENT_REASON, wpm } from "./lib/humanity";
 import { consume, RUN_STARTS } from "./lib/rateLimit";
 import { replay, RULES_VERSION, tooFastWords, type FastWord } from "./lib/rules";
 import { rankFor } from "./players";
@@ -201,6 +201,7 @@ export const submit = mutation({
       runCount: updated.runCount,
       bestScore: updated.bestScore,
       bestWords: updated.bestWords,
+      ...(isPersonalBest ? { bestWpm: wpm(verdict.stats) } : {}),
     });
     if (verdict.words > 0) {
       await ctx.db.insert("runs", {

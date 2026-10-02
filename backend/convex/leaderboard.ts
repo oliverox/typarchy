@@ -10,6 +10,8 @@ export const top = query({
       country: v.union(v.string(), v.null()),
       score: v.number(),
       words: v.number(),
+      // Typing speed of that best run; null when it predates keystroke stats.
+      wpm: v.union(v.number(), v.null()),
     }),
   ),
   handler: async (ctx, args) => {
@@ -25,6 +27,7 @@ export const top = query({
       country: p.country ?? null,
       score: p.bestScore,
       words: p.bestWords,
+      wpm: p.bestWpm ?? null,
     }));
   },
 });

@@ -1,5 +1,6 @@
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
+import { wpm } from "./lib/humanity";
 import { listPending, pendingRow, reviewRun } from "./lib/review";
 
 // Moderation: `npx convex run admin:removePlayer '{"name":"someone"}'`
@@ -70,4 +71,31 @@ export const rejectRun = internalMutation({
   args: { runId: v.id("runs") },
   returns: v.null(),
   handler: async (ctx, args) => await reviewRun(ctx, args.runId, "rejected", undefined),
+});
+
+// One-off: `npx convex run --prod admin:backfillBestWpm`
+// Sets bestWpm from each player's best counted run, for bests set before the
+// leaderboard showed speed. Players whose best has no keystroke stats keep none.
+export const backfillBestWpm = internalMutation({
+  args: {},
+  returns: v.object({ players: v.number(), filled: v.number() }),
+  handler: async (ctx) => {
+    const players = await ctx.db.query("players").take(1000);
+    let filled = 0;
+    for (const player of players) {
+      if (player.bestWpm !== undefined || player.bestScore <= 0) continue;
+      const runs = await ctx.db
+        .query("runs")
+        .withIndex("by_player", (q) => q.eq("playerId", player._id))
+        .collect();
+      const best = runs.find(
+        (r) => r.score === player.bestScore && (r.status ?? "ranked") === "ranked" && r.stats,
+      );
+      const speed = wpm(best?.stats);
+      if (speed === undefined) continue;
+      await ctx.db.patch("players", player._id, { bestWpm: speed });
+      filled++;
+    }
+    return { players: players.length, filled };
+  },
 });
