@@ -106,9 +106,11 @@ Item {
   property string submitError: ""
 
   readonly property string currentWord: wordIndex < words.length ? words[wordIndex] : ""
-  readonly property real deadline: Rules.deadline(wordStart, windowMs)
-  readonly property real remainingMs: phase === "running" ? Math.max(0, deadline - (now - runStartedAt)) : (phase === "over" ? 0 : windowMs)
-  readonly property real clockFraction: Math.max(0, Math.min(1, remainingMs / windowMs))
+  // windowMs is the clock for an average word; this is the current word's share.
+  readonly property real wordWindowMs: currentWord ? Rules.wordWindow(windowMs, currentWord) : windowMs
+  readonly property real deadline: Rules.deadline(wordStart, wordWindowMs)
+  readonly property real remainingMs: phase === "running" ? Math.max(0, deadline - (now - runStartedAt)) : (phase === "over" ? 0 : wordWindowMs)
+  readonly property real clockFraction: Math.max(0, Math.min(1, remainingMs / wordWindowMs))
 
   // --- Theme ---
   property color background: Color.menu.background
@@ -536,7 +538,7 @@ Item {
       return
     }
     root.phase = "starting"
-    root.request("mutation", "game:start", { token: root.playerToken }, 6000, function(error, value) {
+    root.request("mutation", "game:start", { token: root.playerToken, rules: Rules.RULES_VERSION }, 6000, function(error, value) {
       if (root.phase !== "starting") return
       var words = error ? [] : root.cleanWords(value && value.words, 400)
       if (!error && (words.length === 0 || typeof value.sessionId !== "string" || value.sessionId.length > 64)) {

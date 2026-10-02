@@ -5,6 +5,16 @@ export const START_WINDOW_MS = 4200;
 export const MIN_WINDOW_MS = 1200;
 export const WINDOW_DECAY = 0.965;
 
+// Bumped whenever a change here would make the server reject runs played by
+// the previous rules. Clients send it to `game:start`.
+export const RULES_VERSION = 2;
+
+// The clock above is sized for a word of AVERAGE_LETTERS (the pool averages
+// ~7.25). Each word's own window scales with its letters plus a reaction worth
+// REACTION_LETTERS, so a long word gets the same pace per letter as a short one.
+export const AVERAGE_LETTERS = 7;
+export const REACTION_LETTERS = 2;
+
 // A word appears only when the previous one is done, so nobody can start it
 // early: seeing it and pressing the first key takes at least MIN_REACTION_MS,
 // and every further letter at least MIN_MS_PER_KEY on average (≈340 WPM,
@@ -39,6 +49,10 @@ export function nextWindow(windowMs: number): number {
   return Math.max(MIN_WINDOW_MS, windowMs * WINDOW_DECAY);
 }
 
+export function wordWindow(windowMs: number, word: string): number {
+  return (windowMs * (REACTION_LETTERS + word.length)) / (REACTION_LETTERS + AVERAGE_LETTERS);
+}
+
 export function wordScore(word: string, remainingMs: number): number {
   return word.length * 10 + Math.round(remainingMs / 100);
 }
@@ -63,7 +77,7 @@ export function replay(
     if (!Number.isFinite(t) || !Number.isInteger(typos) || typos < 0) {
       return { ok: false, reason: `malformed event ${i}` };
     }
-    const deadline = wordStart + windowMs;
+    const deadline = wordStart + wordWindow(windowMs, word);
     if (t > deadline) {
       return { ok: false, reason: `word ${i} finished after the clock ran out` };
     }
@@ -75,7 +89,11 @@ export function replay(
     wordStart = t;
   }
 
-  return { ok: true, score, words: events.length, bestStreak, endT: wordStart + windowMs };
+  // The word on screen when the clock ran out. A run can only outlast its
+  // issued words by ending on the last one, so fall back to the bare clock.
+  const last = words[events.length];
+  const endT = wordStart + (last === undefined ? windowMs : wordWindow(windowMs, last));
+  return { ok: true, score, words: events.length, bestStreak, endT };
 }
 
 export type FastWord = { index: number; word: string; ms: number; minimumMs: number };

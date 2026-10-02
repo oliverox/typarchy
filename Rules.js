@@ -7,11 +7,20 @@
 var START_WINDOW_MS = 4200
 var MIN_WINDOW_MS = 1200
 var WINDOW_DECAY = 0.965
+var RULES_VERSION = 2
+var AVERAGE_LETTERS = 7
+var REACTION_LETTERS = 2
 var MIN_REACTION_MS = 150
 var MIN_MS_PER_KEY = 35
 
 function nextWindow(windowMs) {
   return Math.max(MIN_WINDOW_MS, windowMs * WINDOW_DECAY)
+}
+
+// A word's own window: the clock is sized for an average-length word and
+// scales with its letters plus a reaction worth REACTION_LETTERS.
+function wordWindow(windowMs, word) {
+  return windowMs * (REACTION_LETTERS + word.length) / (REACTION_LETTERS + AVERAGE_LETTERS)
 }
 
 function wordScore(word, remainingMs) {
@@ -46,7 +55,7 @@ function replay(words, events) {
     var word = words[i]
     if (!isFinite(t) || Math.floor(typos) !== typos || typos < 0)
       return { ok: false, reason: "malformed event " + i }
-    var end = deadline(wordStart, windowMs)
+    var end = deadline(wordStart, wordWindow(windowMs, word))
     if (t > end) return { ok: false, reason: "word " + i + " finished after the clock ran out" }
 
     score += wordScore(word, end - t)
@@ -56,6 +65,7 @@ function replay(words, events) {
     wordStart = t
   }
 
-  var endT = deadline(wordStart, windowMs)
+  var last = words[events.length]
+  var endT = deadline(wordStart, last === undefined ? windowMs : wordWindow(windowMs, last))
   return { ok: true, score: score, words: events.length, bestStreak: bestStreak, endT: endT }
 }

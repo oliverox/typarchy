@@ -6,7 +6,7 @@ import * as server from "../convex/lib/rules.ts";
 // The plugin's Rules.js is a QML `.pragma library` script, not a module.
 const pluginSource = readFileSync(new URL("../../Rules.js", import.meta.url), "utf8")
   .replace(".pragma library", "");
-const plugin = new Function(`${pluginSource}; return { replay, nextWindow, wordScore, START_WINDOW_MS, MIN_WINDOW_MS, WINDOW_DECAY, MIN_REACTION_MS, MIN_MS_PER_KEY, minimumWordMs };`)();
+const plugin = new Function(`${pluginSource}; return { replay, nextWindow, wordWindow, wordScore, START_WINDOW_MS, MIN_WINDOW_MS, WINDOW_DECAY, RULES_VERSION, AVERAGE_LETTERS, REACTION_LETTERS, MIN_REACTION_MS, MIN_MS_PER_KEY, minimumWordMs };`)();
 
 function mulberry32(seed: number) {
   return () => {
@@ -29,7 +29,7 @@ function simulate(seed: number) {
   let wordStart = 0;
   for (const word of words) {
     const typos = rand() < 0.15 ? 1 + Math.floor(rand() * 2) : 0;
-    const budget = windowMs;
+    const budget = server.wordWindow(windowMs, word);
     const minimum = server.minimumWordMs(word);
     const took = minimum + rand() * (budget - minimum) * 1.08;
     if (took > budget) return { words, events };
@@ -41,7 +41,7 @@ function simulate(seed: number) {
 }
 
 test("plugin constants match the server", () => {
-  for (const key of ["START_WINDOW_MS", "MIN_WINDOW_MS", "WINDOW_DECAY", "MIN_REACTION_MS", "MIN_MS_PER_KEY"] as const) {
+  for (const key of ["START_WINDOW_MS", "MIN_WINDOW_MS", "WINDOW_DECAY", "RULES_VERSION", "AVERAGE_LETTERS", "REACTION_LETTERS", "MIN_REACTION_MS", "MIN_MS_PER_KEY"] as const) {
     assert.equal(plugin[key], server[key], key);
   }
 });
@@ -59,29 +59,46 @@ test("plugin and server replay 500 simulated runs identically", () => {
 });
 
 test("score, streak and end time for a known run", () => {
-  const words = ["comet", "harbor", "zinc"];
+  const words = ["comet", "harbor", "zinc", "quartz"];
   const events = [
     { t: 1000, typos: 0 },
     { t: 2500, typos: 1 },
     { t: 3400, typos: 0 },
   ];
   const result = server.replay(words, events);
-  // A typo costs the streak, not time, so every deadline is wordStart + window.
-  // comet: 50 + round(3200/100)=82 · harbor: 60 + round((1000+4053-2500)/100)=86
-  // zinc: 40 + round((2500+3911.145-3400)/100)=70
+  // A typo costs the streak, not time, so every deadline is wordStart + the
+  // word's window: the clock × (2 + letters) / 9.
+  // comet: 50 + round((4200×7/9 − 1000)/100)=73
+  // harbor: 60 + round((1000 + 4053×8/9 − 2500)/100)=81
+  // zinc: 40 + round((2500 + 3911.145×6/9 − 3400)/100)=57
+  // The run ends on quartz, unfinished.
   assert.deepEqual(result, {
     ok: true,
-    score: 82 + 86 + 70,
+    score: 73 + 81 + 57,
     words: 3,
     bestStreak: 2,
-    endT: 3400 + 4200 * 0.965 ** 3,
+    endT: 3400 + server.wordWindow(4200 * 0.965 ** 3, "quartz"),
   });
+  assert.equal(server.wordWindow(4200 * 0.965 ** 3, "quartz"), (4200 * 0.965 ** 3 * 8) / 9);
+});
+
+test("long and short words get the same pace per letter", () => {
+  const clock = 2000;
+  // An average-length word gets the bare clock.
+  assert.equal(server.wordWindow(clock, "pendant"), clock);
+  for (const word of ["axe", "comet", "ultraviolet", "accomplished"]) {
+    const perLetter = server.wordWindow(clock, word) / (server.REACTION_LETTERS + word.length);
+    assert.ok(Math.abs(perLetter - clock / 9) < 1e-9, word);
+    assert.equal(plugin.wordWindow(clock, word), server.wordWindow(clock, word), word);
+  }
+  // Short words still leave room above the anti-bot floor, even at the minimum clock.
+  assert.ok(server.wordWindow(server.MIN_WINDOW_MS, "axe") > 2 * server.minimumWordMs("axe"));
 });
 
 test("typos cost the streak but never time", () => {
   const words = ["comet", "harbor"];
-  const clean = server.replay(words, [{ t: 4000, typos: 0 }]);
-  const typed = server.replay(words, [{ t: 4000, typos: 3 }]);
+  const clean = server.replay(words, [{ t: 3000, typos: 0 }]);
+  const typed = server.replay(words, [{ t: 3000, typos: 3 }]);
   assert.ok(clean.ok && typed.ok);
   assert.equal(typed.score, clean.score, "same score");
   assert.equal(typed.endT, clean.endT, "same end time");
@@ -91,6 +108,9 @@ test("typos cost the streak but never time", () => {
 test("rejects impossible runs", () => {
   const words = ["comet", "harbor"];
   assert.equal(server.replay(words, [{ t: 4300, typos: 0 }]).ok, false, "after the clock");
+  // comet's window is 4200 × 7/9 ≈ 3267ms, shorter than the bare clock.
+  assert.equal(server.replay(words, [{ t: 3266, typos: 0 }]).ok, true, "just inside comet's window");
+  assert.equal(server.replay(words, [{ t: 3268, typos: 0 }]).ok, false, "just past comet's window");
   assert.equal(plugin.minimumWordMs("comet"), server.minimumWordMs("comet"));
   assert.equal(server.replay(words, [{ t: 1000, typos: 0 }, { t: 2000, typos: 0 }, { t: 3000, typos: 0 }]).ok, false, "unissued words");
   assert.equal(server.replay(words, [{ t: 1000, typos: -1 }]).ok, false, "negative typos");

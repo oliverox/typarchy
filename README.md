@@ -96,7 +96,10 @@ The `backend/` folder is the server code. You don't need to install it to play.
 
 ## Rules
 
-- The first word gets 4.2s. Each completed word shrinks the next window by 3.5%, down to 1.2s.
+- The clock starts at 4.2s. Each completed word shrinks it by 3.5%, down to 1.2s.
+- That clock is for a 7-letter word. Each word's time scales with its letters plus two
+  letters' worth of reaction time, so every word asks for the same pace: at the start
+  "axe" gets 2.3s and "accomplished" 6.5s, at the 1.2s clock 0.67s and 1.9s.
 - A word scores `letters × 10 + remaining time / 100ms`.
 - A wrong keystroke breaks the streak but costs no time.
 - Nobody reads and types faster than 150ms for the first key plus 35ms per further letter, so

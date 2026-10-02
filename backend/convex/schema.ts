@@ -24,6 +24,8 @@ export default defineSchema({
   sessions: defineTable({
     playerId: v.id("players"),
     startedAt: v.number(),
+    // RULES_VERSION the run is played by. Absent on sessions started before it.
+    rules: v.optional(v.number()),
     words: v.array(v.string()),
     checkpoints: v.array(
       v.object({ count: v.number(), t: v.number(), at: v.number() }),

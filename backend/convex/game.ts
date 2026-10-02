@@ -5,7 +5,7 @@ import type { Doc, Id } from "./_generated/dataModel";
 import { requirePlayer } from "./lib/auth";
 import { analyze, OLD_CLIENT_REASON } from "./lib/humanity";
 import { consume, RUN_STARTS } from "./lib/rateLimit";
-import { replay, tooFastWords, type FastWord } from "./lib/rules";
+import { replay, RULES_VERSION, tooFastWords, type FastWord } from "./lib/rules";
 import { rankFor } from "./players";
 
 const INITIAL_WORDS = 150;
@@ -87,7 +87,8 @@ async function ownedSession(
 }
 
 export const start = mutation({
-  args: { token: v.string() },
+  // `rules` is optional only so old clients get a readable rejection.
+  args: { token: v.string(), rules: v.optional(v.number()) },
   returns: v.object({
     sessionId: v.id("sessions"),
     words: v.array(v.string()),
@@ -95,6 +96,9 @@ export const start = mutation({
   }),
   handler: async (ctx, args) => {
     const player = await requirePlayer(ctx, args.token);
+    if (args.rules !== RULES_VERSION) {
+      throw new ConvexError({ code: "OLD_CLIENT", message: OLD_CLIENT_REASON });
+    }
     await consume(ctx, `start:${player._id}`, RUN_STARTS);
 
     // One live run per player; starting again abandons the previous one.
@@ -108,6 +112,7 @@ export const start = mutation({
     const sessionId = await ctx.db.insert("sessions", {
       playerId: player._id,
       startedAt: Date.now(),
+      rules: RULES_VERSION,
       words,
       checkpoints: [],
     });
@@ -250,6 +255,8 @@ function verify(
   events: { t: number; typos: number; keys?: number[] }[],
   now: number,
 ) {
+  // Runs started under older rules would fail the replay and look scripted.
+  if (session.rules !== RULES_VERSION) return { ok: false as const, reason: OLD_CLIENT_REASON };
   const result = replay(session.words, events);
   if (!result.ok) return botDetected(player, result.reason);
   const fast = tooFastWords(session.words, events);
