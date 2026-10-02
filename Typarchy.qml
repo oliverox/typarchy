@@ -253,7 +253,7 @@ Item {
       recentRuns: runs.map(function(r) {
         r = r || {}
         var status = r.status === "pending" || r.status === "rejected" ? r.status : "ranked"
-        return { score: root.count(r.score), words: root.count(r.words), playedAt: typeof r.playedAt === "number" && isFinite(r.playedAt) ? r.playedAt : 0, status: status }
+        return { score: root.count(r.score), words: root.count(r.words), wpm: root.count(r.wpm, 1000), playedAt: typeof r.playedAt === "number" && isFinite(r.playedAt) ? r.playedAt : 0, status: status }
       })
     }
   }
@@ -1464,6 +1464,15 @@ Item {
                   horizontalAlignment: Text.AlignRight
                   textFormat: Text.PlainText
                   text: modelData.words + "w"
+                  color: root.dim
+                  font.family: root.fontFamily
+                  font.pixelSize: Style.font.bodySmall
+                }
+                Text {
+                  width: Style.space(56)
+                  horizontalAlignment: Text.AlignRight
+                  textFormat: Text.PlainText
+                  text: modelData.wpm > 0 ? modelData.wpm + " wpm" : ""
                   color: root.dim
                   font.family: root.fontFamily
                   font.pixelSize: Style.font.bodySmall

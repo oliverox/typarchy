@@ -4,6 +4,7 @@ import type { QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
 import { findPlayer, hashToken, newToken, requirePlayer } from "./lib/auth";
 import { COUNTRY_CODES } from "./lib/countries";
+import { wpm } from "./lib/humanity";
 import { consume, COUNTRY_CHANGES, NICKNAME_CLAIMS } from "./lib/rateLimit";
 
 const NAME_PATTERN = /^[A-Za-z0-9_-]{3,16}$/;
@@ -97,6 +98,8 @@ export const me = query({
           score: v.number(),
           words: v.number(),
           bestStreak: v.number(),
+          // Typing speed; null for runs from before keystroke stats.
+          wpm: v.union(v.number(), v.null()),
           playedAt: v.number(),
           status: v.union(v.literal("ranked"), v.literal("pending"), v.literal("rejected")),
         }),
@@ -122,6 +125,7 @@ export const me = query({
         score: r.score,
         words: r.words,
         bestStreak: r.bestStreak,
+        wpm: wpm(r.stats) ?? null,
         playedAt: r._creationTime,
         status: r.status ?? "ranked",
       })),
