@@ -1168,7 +1168,8 @@ Item {
                 width: parent.width
                 horizontalAlignment: Text.AlignHCenter
                 textFormat: Text.PlainText
-                text: root.events.length + " words · best streak " + root.bestStreak
+                readonly property int runWpm: Rules.wpm(root.words, root.events)
+                text: root.events.length + " words · " + (runWpm > 0 ? runWpm + " wpm · " : "") + "best streak " + root.bestStreak
                 color: root.dim
                 font.family: root.fontFamily
                 font.pixelSize: Style.font.title

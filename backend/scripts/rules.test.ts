@@ -2,11 +2,12 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import * as server from "../convex/lib/rules.ts";
+import { analyze, wpm } from "../convex/lib/humanity.ts";
 
 // The plugin's Rules.js is a QML `.pragma library` script, not a module.
 const pluginSource = readFileSync(new URL("../../Rules.js", import.meta.url), "utf8")
   .replace(".pragma library", "");
-const plugin = new Function(`${pluginSource}; return { replay, nextWindow, wordWindow, wordScore, START_WINDOW_MS, MIN_WINDOW_MS, WINDOW_DECAY, RULES_VERSION, AVERAGE_LETTERS, REACTION_LETTERS, MIN_REACTION_MS, MIN_MS_PER_KEY, minimumWordMs };`)();
+const plugin = new Function(`${pluginSource}; return { replay, wpm, nextWindow, wordWindow, wordScore, START_WINDOW_MS, MIN_WINDOW_MS, WINDOW_DECAY, RULES_VERSION, AVERAGE_LETTERS, REACTION_LETTERS, MIN_REACTION_MS, MIN_MS_PER_KEY, minimumWordMs };`)();
 
 function mulberry32(seed: number) {
   return () => {
@@ -130,4 +131,27 @@ test("finds words typed under the speed floor", () => {
     { t: 2000, typos: 0 },
   ]);
   assert.deepEqual(fast.map((f) => f.index), [1]);
+});
+
+test("plugin works out the same wpm as the server", () => {
+  const rand = mulberry32(7);
+  for (let run = 0; run < 50; run++) {
+    const words = Array.from({ length: 30 }, () => POOL[Math.floor(rand() * POOL.length)]);
+    const events = [];
+    let t = 0;
+    for (const word of words) {
+      const keys = [];
+      t += 300 + rand() * 600;
+      for (let k = 0; k < word.length; k++) {
+        if (k > 0) t += 60 + rand() * 250;
+        keys.push(Math.round(t));
+      }
+      t = keys[keys.length - 1];
+      events.push({ t, typos: 0, keys });
+    }
+    const verdict = analyze(words, events);
+    assert.ok(verdict.ok);
+    assert.equal(plugin.wpm(words, events), wpm(verdict.stats), `run ${run}`);
+  }
+  assert.equal(plugin.wpm(["a"], [{ t: 300, typos: 0, keys: [300] }]), 0, "nothing to time");
 });

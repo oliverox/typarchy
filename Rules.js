@@ -31,6 +31,24 @@ function minimumWordMs(word) {
   return MIN_REACTION_MS + (word.length - 1) * MIN_MS_PER_KEY
 }
 
+// Words per minute from a run's keystrokes, as the server works it out
+// (msPerLetter in backend/convex/lib/humanity.ts, then wpm): the time from
+// each word's first key to its last, over the letters after the first, at
+// five letters a word. 0 when there's nothing to time.
+function wpm(words, events) {
+  var typingMs = 0
+  var laterLetters = 0
+  for (var i = 0; i < events.length; i++) {
+    var keys = events[i].keys
+    if (!keys || keys.length === 0) continue
+    typingMs += events[i].t - keys[0]
+    laterLetters += words[i].length - 1
+  }
+  if (laterLetters === 0 || typingMs <= 0) return 0
+  var msPerLetter = Math.round(typingMs / laterLetters * 100) / 100
+  return Math.round(60000 / (5 * msPerLetter))
+}
+
 function deadline(wordStart, windowMs) {
   return wordStart + windowMs
 }
