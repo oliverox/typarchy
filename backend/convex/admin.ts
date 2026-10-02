@@ -4,7 +4,7 @@ import { wpm } from "./lib/humanity";
 import { listPending, pendingRow, reviewRun } from "./lib/review";
 
 // Moderation: `npx convex run admin:removePlayer '{"name":"someone"}'`
-// Deletes the player with their runs and any live session.
+// Deletes the player with their runs, rhythm profile and any live session.
 export const removePlayer = internalMutation({
   args: { name: v.string() },
   returns: v.object({ removed: v.boolean(), runs: v.number() }),
@@ -23,7 +23,12 @@ export const removePlayer = internalMutation({
       .query("sessions")
       .withIndex("by_player", (q) => q.eq("playerId", player._id))
       .collect();
+    const rhythms = await ctx.db
+      .query("rhythms")
+      .withIndex("by_player", (q) => q.eq("playerId", player._id))
+      .collect();
     await Promise.all([
+      ...rhythms.map((r) => ctx.db.delete("rhythms", r._id)),
       ...runs.map((r) => ctx.db.delete("runs", r._id)),
       ...sessions.map((s) => ctx.db.delete("sessions", s._id)),
       ctx.db.delete("players", player._id),

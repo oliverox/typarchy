@@ -3,6 +3,14 @@ import { internalMutation, mutation } from "./_generated/server";
 import type { MutationCtx } from "./_generated/server";
 import type { Doc, Id } from "./_generated/dataModel";
 import { requirePlayer } from "./lib/auth";
+import {
+  JUMP_HISTORY,
+  JUMP_MIN_WORDS,
+  rhythmMatch,
+  runPairs,
+  speedJump,
+  updateProfile,
+} from "./lib/consistency";
 import { analyze, OLD_CLIENT_REASON, wpm } from "./lib/humanity";
 import { consume, RUN_STARTS } from "./lib/rateLimit";
 import { replay, RULES_VERSION, tooFastWords, type FastWord } from "./lib/rules";
@@ -187,6 +195,26 @@ export const submit = mutation({
     const improves = verdict.score > player.bestScore;
     const flags = [...verdict.flags];
     if (improves) flags.push(...(await boardFlags(ctx, verdict.score)));
+
+    // Compare with the player's own history (lib/consistency.ts).
+    const pairs = runPairs(session.words, args.events);
+    const profile = await ctx.db
+      .query("rhythms")
+      .withIndex("by_player", (q) => q.eq("playerId", player._id))
+      .unique();
+    const rhythm = profile ? rhythmMatch(profile.pairs, pairs) : null;
+    if (rhythm !== null) {
+      console.log(`run by ${player.name}: rhythm match ${rhythm} over ${verdict.words} words`);
+      if (RHYTHM_FLAG_BELOW !== null && rhythm < RHYTHM_FLAG_BELOW) flags.push("unfamiliar rhythm");
+    }
+    const runWpm = wpm(verdict.stats);
+    if (
+      runWpm !== undefined &&
+      verdict.words >= JUMP_MIN_WORDS &&
+      speedJump(runWpm, await recentWpms(ctx, player._id))
+    ) {
+      flags.push("sudden speed jump");
+    }
     // A run that doesn't raise the player's best can't change the board.
     const pending = improves && flags.length > 0;
     const isPersonalBest = improves && !pending;
@@ -213,7 +241,17 @@ export const submit = mutation({
         status: pending ? "pending" : "ranked",
         flags,
         stats: verdict.stats,
+        ...(rhythm !== null ? { rhythm } : {}),
       });
+    }
+    // Only runs that count shape the profile, so a held run can't teach it
+    // a script's rhythm.
+    if (!pending && pairs.size > 0) {
+      if (profile) {
+        await ctx.db.patch("rhythms", profile._id, { pairs: updateProfile(profile.pairs, pairs) });
+      } else {
+        await ctx.db.insert("rhythms", { playerId: player._id, pairs: updateProfile({}, pairs) });
+      }
     }
 
     return {
@@ -228,6 +266,26 @@ export const submit = mutation({
     };
   },
 });
+
+// Rhythm matching runs in shadow mode until real players' numbers are in:
+// each run's match is stored and logged but holds nothing. Set a threshold
+// here (a match below it flags the run) once the spread is known.
+const RHYTHM_FLAG_BELOW: number | null = null;
+
+// Typing speed of the player's recent runs that are long enough to judge.
+async function recentWpms(ctx: MutationCtx, playerId: Id<"players">): Promise<number[]> {
+  const runs = await ctx.db
+    .query("runs")
+    .withIndex("by_player", (q) => q.eq("playerId", playerId))
+    .order("desc")
+    .take(JUMP_HISTORY * 2);
+  const speeds: number[] = [];
+  for (const run of runs) {
+    const speed = run.status === "rejected" || run.words < JUMP_MIN_WORDS ? undefined : wpm(run.stats);
+    if (speed !== undefined) speeds.push(speed);
+  }
+  return speeds.slice(0, JUMP_HISTORY);
+}
 
 // Flags for a score that would reshape the top of the board.
 async function boardFlags(ctx: MutationCtx, score: number): Promise<string[]> {

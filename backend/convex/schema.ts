@@ -57,6 +57,9 @@ export default defineSchema({
     flags: v.optional(v.array(v.string())),
     // The admin who approved or rejected a held run.
     reviewedBy: v.optional(v.id("players")),
+    // How well the run's letter-pair rhythm matched the player's profile
+    // (lib/consistency.ts), when there was enough to compare.
+    rhythm: v.optional(v.number()),
     stats: v.optional(
       v.object({
         medianReactionMs: v.number(),
@@ -69,6 +72,13 @@ export default defineSchema({
   })
     .index("by_player", ["playerId"])
     .index("by_status", ["status"]),
+
+  // Each player's typing rhythm per letter pair, built from their ranked runs
+  // (lib/consistency.ts). Keys are two lowercase letters.
+  rhythms: defineTable({
+    playerId: v.id("players"),
+    pairs: v.record(v.string(), v.object({ n: v.number(), mean: v.number() })),
+  }).index("by_player", ["playerId"]),
 
   rateLimits: defineTable({
     key: v.string(),
