@@ -17,10 +17,18 @@ export default defineSchema({
     isAdmin: v.optional(v.boolean()),
     // ISO 3166-1 alpha-2 code the player chose to show as a flag, if any.
     country: v.optional(v.string()),
+    // Best ranked run of one week, and the week it belongs to (lib/weeks.ts).
+    // It counts on the weekly board only while that is the current week.
+    week: v.optional(v.number()),
+    weekScore: v.optional(v.number()),
+    weekWords: v.optional(v.number()),
+    // Typing speed of that run, like bestWpm.
+    weekWpm: v.optional(v.number()),
   })
     .index("by_nameKey", ["nameKey"])
     .index("by_tokenHash", ["tokenHash"])
-    .index("by_bestScore", ["bestScore"]),
+    .index("by_bestScore", ["bestScore"])
+    .index("by_week", ["week", "weekScore"]),
 
   // A run in progress. The server hands out the words and timestamps every
   // checkpoint, so a submitted run has to line up with real elapsed time.

@@ -30,6 +30,15 @@ npx convex run --prod wordSync:refresh
 
 Then set `CONVEX_URL` in [`bin/typarchy-api`](../bin/typarchy-api) to the production deployment URL.
 
+The weekly board needs no cron: each player's weekly best is stamped with its week
+(Monday 00:00 UTC, see `convex/lib/weeks.ts`) and stops counting when the week turns. On a
+deployment that already has runs from before the weekly board existed, fill in the current
+week once:
+
+```bash
+npx convex run --prod admin:backfillWeek
+```
+
 ## Moderation
 
 Admins review held runs in the game: the leaderboard tab lists them with approve and

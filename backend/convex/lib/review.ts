@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import type { MutationCtx, QueryCtx } from "../_generated/server";
 import type { Doc, Id } from "../_generated/dataModel";
 import { wpm } from "./humanity";
+import { creditWeek } from "./weeks";
 
 export const pendingRow = v.object({
   runId: v.id("runs"),
@@ -59,6 +60,8 @@ export async function listPending(ctx: QueryCtx) {
 
 // Approving ranks the run and raises the player's best if it's higher, and
 // ranks the player's lower held runs with it: they can't change the board.
+// Each counts for the week it was played in, so one approved after its week
+// ended leaves the current weekly board alone.
 // Rejecting keeps it in their history, off the board.
 export async function reviewRun(
   ctx: MutationCtx,
@@ -70,17 +73,23 @@ export async function reviewRun(
   if (!run || run.status !== "pending") throw new Error("No pending run with that id");
   await ctx.db.patch("runs", run._id, { status, reviewedBy });
   if (status === "ranked") {
+    const ranked = [run];
     for (const other of await pendingRuns(ctx)) {
       if (other.playerId === run.playerId && other.score <= run.score) {
         await ctx.db.patch("runs", other._id, { status, reviewedBy });
+        ranked.push(other);
       }
     }
     const player = await ctx.db.get("players", run.playerId);
-    if (player && run.score > player.bestScore) {
+    if (player) {
       await ctx.db.patch("players", player._id, {
-        bestScore: run.score,
-        bestWords: run.words,
-        bestWpm: wpm(run.stats),
+        ...(run.score > player.bestScore
+          ? { bestScore: run.score, bestWords: run.words, bestWpm: wpm(run.stats) }
+          : {}),
+        ...creditWeek(
+          player,
+          ranked.map((r) => ({ at: r._creationTime, score: r.score, words: r.words, wpm: wpm(r.stats) })),
+        ),
       });
     }
   }

@@ -91,6 +91,7 @@ The `backend/` folder is the server code. You don't need to install it to play.
 | letters | type the word — it completes automatically when it matches |
 | Backspace, Ctrl+Backspace, Ctrl+W | delete a letter / clear the word |
 | Tab | switch between survival and leaderboard |
+| W | switch the leaderboard between this week and all time |
 | R | refresh the leaderboard |
 | Esc | abandon the run, leave the leaderboard, or close |
 
@@ -131,6 +132,11 @@ the backend tests replay simulated runs through both to keep them identical.
   keystrokes, no typos over 60+ words. The same goes for any new #1, and, once the board has 25
   players, any run entering the top 10. It shows as "review" in your last runs until an
   admin approves it.
+- **Two boards.** The leaderboard opens on this week's board: every player's best run since
+  Monday 00:00 UTC. It starts over each Monday; nothing is deleted, last week's scores just
+  stop counting. `w` switches to the all-time board, which never resets. A run held for
+  review stays off both boards until it's approved, and an unusual-looking run is also held
+  when it would only raise your best of the week.
 - **Rate limits.** Each player can start 30 runs at once and 60 per hour after that.
   Nickname claims are capped at 20 per hour across everyone.
 - **What this doesn't stop.** The client is open source, so a script can always play like

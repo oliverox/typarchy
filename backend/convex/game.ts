@@ -14,7 +14,8 @@ import {
 import { analyze, OLD_CLIENT_REASON, wpm } from "./lib/humanity";
 import { consume, RUN_STARTS } from "./lib/rateLimit";
 import { replay, RULES_VERSION, tooFastWords, type FastWord } from "./lib/rules";
-import { rankFor } from "./players";
+import { creditWeek, weekOf, weekScore } from "./lib/weeks";
+import { rankFor, weekRankFor } from "./players";
 
 const INITIAL_WORDS = 150;
 const EXTRA_WORDS = 100;
@@ -178,6 +179,9 @@ export const submit = mutation({
       personalBest: v.number(),
       isPersonalBest: v.boolean(),
       rank: v.union(v.number(), v.null()),
+      weekBest: v.number(),
+      isWeekBest: v.boolean(),
+      weekRank: v.union(v.number(), v.null()),
     }),
     v.object({ accepted: v.literal(false), reason: v.string() }),
   ),
@@ -187,12 +191,15 @@ export const submit = mutation({
     // Sessions are single-use whatever the verdict.
     await ctx.db.delete("sessions", session._id);
 
-    const verdict = verify(player, session, args.events, Date.now());
+    const now = Date.now();
+    const verdict = verify(player, session, args.events, now);
     if (!verdict.ok) {
       return { accepted: false as const, reason: verdict.reason };
     }
 
+    const week = weekOf(now);
     const improves = verdict.score > player.bestScore;
+    const improvesWeek = verdict.score > weekScore(player, week);
     const flags = [...verdict.flags];
     if (improves) flags.push(...(await boardFlags(ctx, verdict.score)));
 
@@ -215,22 +222,22 @@ export const submit = mutation({
     ) {
       flags.push("sudden speed jump");
     }
-    // A run that doesn't raise the player's best can't change the board.
-    const pending = improves && flags.length > 0;
+    // A run that raises neither of the player's bests can't change a board.
+    const pending = (improves || improvesWeek) && flags.length > 0;
     const isPersonalBest = improves && !pending;
+    const isWeekBest = improvesWeek && !pending;
 
-    const updated = {
-      ...player,
+    const changes = {
       runCount: player.runCount + 1,
       bestScore: isPersonalBest ? verdict.score : player.bestScore,
       bestWords: isPersonalBest ? verdict.words : player.bestWords,
+      ...(isPersonalBest ? { bestWpm: runWpm } : {}),
+      ...(isWeekBest
+        ? creditWeek(player, [{ at: now, score: verdict.score, words: verdict.words, wpm: runWpm }])
+        : {}),
     };
-    await ctx.db.patch("players", player._id, {
-      runCount: updated.runCount,
-      bestScore: updated.bestScore,
-      bestWords: updated.bestWords,
-      ...(isPersonalBest ? { bestWpm: wpm(verdict.stats) } : {}),
-    });
+    const updated = { ...player, ...changes };
+    await ctx.db.patch("players", player._id, changes);
     if (verdict.words > 0) {
       await ctx.db.insert("runs", {
         playerId: player._id,
@@ -263,6 +270,9 @@ export const submit = mutation({
       personalBest: updated.bestScore,
       isPersonalBest,
       rank: await rankFor(ctx, updated),
+      weekBest: weekScore(updated, week),
+      isWeekBest,
+      weekRank: await weekRankFor(ctx, updated, week),
     };
   },
 });
@@ -287,7 +297,8 @@ async function recentWpms(ctx: MutationCtx, playerId: Id<"players">): Promise<nu
   return speeds.slice(0, JUMP_HISTORY);
 }
 
-// Flags for a score that would reshape the top of the board.
+// Flags for a score that would reshape the top of the all-time board. The
+// weekly board starts empty every Monday, so its top isn't guarded this way.
 async function boardFlags(ctx: MutationCtx, score: number): Promise<string[]> {
   const leader = await ctx.db
     .query("players")

@@ -55,6 +55,10 @@ Item {
   property string playerToken: ""
   property var me: null
   property var topPlayers: []
+  // "week" ranks each player's best run since Monday 00:00 UTC, "all" their best ever.
+  property string boardScope: "week"
+  // When the weekly board starts over, as the server reported it.
+  property real weekEndsAt: 0
   property bool boardLoading: false
   property string boardError: ""
   property var practiceWords: []
@@ -184,10 +188,19 @@ Item {
 
   function refreshBoard() {
     root.boardLoading = true
-    root.request("query", "leaderboard:top", { limit: 20 }, 8000, function(error, value) {
+    var scope = root.boardScope
+    root.request("query", scope === "week" ? "leaderboard:weekly" : "leaderboard:top", { limit: 20 }, 8000, function(error, value) {
+      // The player switched boards while this one was loading.
+      if (scope !== root.boardScope) return
       root.boardLoading = false
       root.boardError = error ? error.message : ""
-      if (!error) root.topPlayers = root.cleanBoard(value)
+      if (error) return
+      if (scope === "week") {
+        value = value || {}
+        root.weekEndsAt = typeof value.endsAt === "number" && isFinite(value.endsAt) ? value.endsAt : 0
+        value = value.players
+      }
+      root.topPlayers = root.cleanBoard(value)
     })
     if (!root.playerToken) return
     root.request("query", "players:me", { token: root.playerToken }, 8000, function(error, value) {
@@ -199,6 +212,22 @@ Item {
         else root.pendingRuns = []
       }
     })
+  }
+
+  function switchBoard() {
+    root.boardScope = root.boardScope === "week" ? "all" : "week"
+    root.topPlayers = []
+    root.refreshBoard()
+  }
+
+  // "3d 4h", "5h 12m" or "12m" until the weekly board starts over.
+  function weekResetsIn() {
+    var minutes = Math.ceil((root.weekEndsAt - Date.now()) / 60000)
+    if (!(root.weekEndsAt > 0) || minutes <= 0) return ""
+    var days = Math.floor(minutes / 1440)
+    var hours = Math.floor(minutes / 60) % 24
+    if (days > 0) return days + "d " + hours + "h"
+    return hours > 0 ? hours + "h " + (minutes % 60) + "m" : minutes + "m"
   }
 
   function refreshPending() {
@@ -248,6 +277,8 @@ Item {
       bestScore: root.count(value.bestScore),
       runCount: root.count(value.runCount),
       rank: root.count(value.rank) || null,
+      weekScore: root.count(value.weekScore),
+      weekRank: root.count(value.weekRank) || null,
       country: Countries.known(value.country) ? value.country : "",
       isAdmin: value.isAdmin === true,
       recentRuns: runs.map(function(r) {
@@ -678,7 +709,9 @@ Item {
         pending: value.pending === true,
         rank: root.count(value.rank) || null,
         personalBest: root.count(value.personalBest),
-        isPersonalBest: value.isPersonalBest === true
+        isPersonalBest: value.isPersonalBest === true,
+        weekRank: root.count(value.weekRank) || null,
+        isWeekBest: value.isWeekBest === true
       }
       root.submitState = value.accepted === true ? "accepted" : "rejected"
       if (value.accepted !== true) root.submitError = Api.message(value.reason, "run rejected")
@@ -696,7 +729,10 @@ Item {
       var r = root.submitResult
       if (r.pending) return "held for review — it counts once an admin approves it"
       var rank = r.rank ? "#" + r.rank + " worldwide" : "unranked"
-      return r.isPersonalBest ? "new personal best · " + rank : "best " + r.personalBest + " · " + rank
+      var week = r.weekRank ? "#" + r.weekRank + " this week" : ""
+      if (r.isPersonalBest) return "new personal best · " + rank + (week ? " · " + week : "")
+      if (r.isWeekBest && week) return "your best this week · " + week + " · " + rank
+      return "best " + r.personalBest + " · " + rank + (week ? " · " + week : "")
     }
     return ""
   }
@@ -751,6 +787,7 @@ Item {
       }
       if (key === Qt.Key_C && !ctrl && root.me) root.editCountry()
       else if (key === Qt.Key_R && !ctrl) root.refreshBoard()
+      else if (key === Qt.Key_W && !ctrl) root.switchBoard()
       else if (key === Qt.Key_Return || key === Qt.Key_Enter) root.startRun()
       return true
     }
@@ -972,7 +1009,7 @@ Item {
           text: {
             if (root.phase === "running") return "esc abandon run"
             if (root.view === "board" && root.countryEditing) return "← → country · shift+← → by letter · enter save · esc cancel"
-            if (root.view === "board") return "enter play · r refresh" + (root.me ? " · c country" : "") + " · tab survival · esc back"
+            if (root.view === "board") return "enter play · w " + (root.boardScope === "week" ? "all time" : "this week") + " · r refresh" + (root.me ? " · c country" : "") + " · tab survival · esc back"
             if (root.phase === "nickname") return "enter claim nickname · ← → country · tab leaderboard · esc close"
             return "enter play · tab leaderboard · esc close"
           }
@@ -1288,11 +1325,18 @@ Item {
               Rectangle { width: parent.width; height: 1; color: root.faint }
             }
 
-            Caption { text: "top typists worldwide" }
+            Caption {
+              text: {
+                if (root.boardScope !== "week") return "top typists of all time"
+                // Reading topPlayers recomputes the countdown on every refresh.
+                var left = root.topPlayers && !root.boardLoading ? root.weekResetsIn() : ""
+                return "top typists this week" + (left ? " · resets in " + left : "")
+              }
+            }
 
             Caption {
               visible: root.topPlayers.length === 0
-              text: root.boardLoading ? "loading…" : (root.boardError || "no runs yet — be the first")
+              text: root.boardLoading ? "loading…" : (root.boardError || (root.boardScope === "week" ? "no runs this week yet — be the first" : "no runs yet — be the first"))
               color: root.boardError ? root.urgent : root.dim
               font.capitalization: Font.MixedCase
               font.letterSpacing: 0
@@ -1429,6 +1473,12 @@ Item {
               Stat { label: "best"; value: root.me ? String(root.me.bestScore) : "0"; valueColor: root.accent }
               Stat { label: "rank"; value: root.me && root.me.rank ? "#" + root.me.rank : "—" }
               Stat { label: "runs"; value: root.me ? String(root.me.runCount) : "0" }
+            }
+            Row {
+              visible: !!root.me
+              spacing: Style.spacing.huge
+              Stat { label: "this week"; value: root.me && root.me.weekScore ? String(root.me.weekScore) : "—"; valueColor: root.accent }
+              Stat { label: "rank"; value: root.me && root.me.weekRank ? "#" + root.me.weekRank : "—" }
             }
             Caption {
               visible: !root.me

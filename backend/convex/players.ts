@@ -6,6 +6,7 @@ import { findPlayer, hashToken, newToken, requirePlayer } from "./lib/auth";
 import { COUNTRY_CODES } from "./lib/countries";
 import { wpm } from "./lib/humanity";
 import { consume, COUNTRY_CHANGES, NICKNAME_CLAIMS } from "./lib/rateLimit";
+import { weekOf, weekScore } from "./lib/weeks";
 
 const NAME_PATTERN = /^[A-Za-z0-9_-]{3,16}$/;
 const RANK_SCAN_LIMIT = 10_000;
@@ -69,6 +70,17 @@ export async function rankFor(ctx: QueryCtx, player: Doc<"players">) {
   return above.length + 1;
 }
 
+// The same, on the weekly board of `week`.
+export async function weekRankFor(ctx: QueryCtx, player: Doc<"players">, week: number) {
+  const score = weekScore(player, week);
+  if (score <= 0) return null;
+  const above = await ctx.db
+    .query("players")
+    .withIndex("by_week", (q) => q.eq("week", week).gt("weekScore", score))
+    .take(RANK_SCAN_LIMIT);
+  return above.length + 1;
+}
+
 // The flag a player shows next to their name, or none.
 export const setCountry = mutation({
   args: { token: v.string(), country: v.union(v.string(), v.null()) },
@@ -91,6 +103,9 @@ export const me = query({
       bestScore: v.number(),
       runCount: v.number(),
       rank: v.union(v.number(), v.null()),
+      // This week's best and where it stands; 0 and null before a ranked run.
+      weekScore: v.number(),
+      weekRank: v.union(v.number(), v.null()),
       country: v.union(v.string(), v.null()),
       isAdmin: v.boolean(),
       recentRuns: v.array(
@@ -114,11 +129,14 @@ export const me = query({
       .withIndex("by_player", (q) => q.eq("playerId", player._id))
       .order("desc")
       .take(5);
+    const week = weekOf(Date.now());
     return {
       name: player.name,
       bestScore: player.bestScore,
       runCount: player.runCount,
       rank: await rankFor(ctx, player),
+      weekScore: weekScore(player, week),
+      weekRank: await weekRankFor(ctx, player, week),
       country: player.country ?? null,
       isAdmin: player.isAdmin === true,
       recentRuns: runs.map((r) => ({

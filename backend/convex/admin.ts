@@ -1,7 +1,9 @@
 import { v } from "convex/values";
 import { internalMutation, internalQuery } from "./_generated/server";
+import type { Doc, Id } from "./_generated/dataModel";
 import { wpm } from "./lib/humanity";
 import { listPending, pendingRow, reviewRun } from "./lib/review";
+import { creditWeek, weekOf } from "./lib/weeks";
 
 // Moderation: `npx convex run admin:removePlayer '{"name":"someone"}'`
 // Deletes the player with their runs, rhythm profile and any live session.
@@ -102,5 +104,43 @@ export const backfillBestWpm = internalMutation({
       filled++;
     }
     return { players: players.length, filled };
+  },
+});
+
+// `npx convex run admin:backfillWeek`
+// Rebuilds this week's board from the runs played since Monday. Run it once
+// after deploying the weekly board, so it doesn't start out empty mid-week.
+// Runs that were flagged but never reviewed are left out: before the weekly
+// board they were only held when they beat the player's all-time best.
+export const backfillWeek = internalMutation({
+  args: {},
+  returns: v.object({ runs: v.number(), players: v.number() }),
+  handler: async (ctx) => {
+    const week = weekOf(Date.now());
+    const runs = await ctx.db
+      .query("runs")
+      .withIndex("by_creation_time", (q) => q.gte("_creationTime", week))
+      .collect();
+    const byPlayer = new Map<Id<"players">, Doc<"runs">[]>();
+    for (const run of runs) {
+      if ((run.status ?? "ranked") !== "ranked") continue;
+      if ((run.flags ?? []).length > 0 && !run.reviewedBy) continue;
+      byPlayer.set(run.playerId, [...(byPlayer.get(run.playerId) ?? []), run]);
+    }
+    let counted = 0;
+    for (const [playerId, played] of byPlayer) {
+      const player = await ctx.db.get("players", playerId);
+      if (!player) continue;
+      counted += played.length;
+      await ctx.db.patch(
+        "players",
+        playerId,
+        creditWeek(
+          player,
+          played.map((r) => ({ at: r._creationTime, score: r.score, words: r.words, wpm: wpm(r.stats) })),
+        ),
+      );
+    }
+    return { runs: counted, players: byPlayer.size };
   },
 });
