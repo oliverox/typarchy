@@ -32,12 +32,17 @@ const MAX_KEYS_PER_WORD = 200;
 const MIN_GAPS_FOR_CV = 40;
 const MIN_WORDS_FOR_REACTION_CV = 15;
 
-// Below these no person types: reject.
+// Below these no person types: reject. Measured on 1,190 ranked runs by 42
+// players (2026-10-13): key gaps spread 0.27 at the very least, 0.63 in the
+// median run. Reactions are far steadier: the median run sits at 0.14 and
+// 0.08 is common, so a reject there needs a wide margin (a real player was
+// rejected at the old 0.08).
 const REJECT_KEY_GAP_CV = 0.15;
-const REJECT_REACTION_CV = 0.08;
+const REJECT_REACTION_CV = 0.03;
 
 // Possible for a person, but worth a look before it reaches the board.
 const REVIEW_KEY_GAP_CV = 0.25;
+const REVIEW_REACTION_CV = 0.05;
 const REVIEW_MS_PER_LETTER = 55; // ≈ 220 WPM sustained
 const REVIEW_MEDIAN_REACTION_MS = 200;
 const REVIEW_CLEAN_WORDS = 60;
@@ -106,6 +111,7 @@ export function analyze(words: readonly string[], events: readonly KeyedEvent[])
 
   const flags: string[] = [];
   if (keyGapCv !== null && keyGapCv < REVIEW_KEY_GAP_CV) flags.push("even keystrokes");
+  if (reactionCv !== null && reactionCv < REVIEW_REACTION_CV) flags.push("even reactions");
   if (events.length >= MIN_WORDS_FOR_SPEED_FLAGS) {
     if (stats.msPerLetter < REVIEW_MS_PER_LETTER) flags.push("very fast typing");
     if (stats.medianReactionMs < REVIEW_MEDIAN_REACTION_MS) flags.push("very fast reactions");

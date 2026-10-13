@@ -126,10 +126,12 @@ the backend tests replay simulated runs through both to keep them identical.
   invented timestamps, impossibly fast words).
 - **Keystroke timing.** Each word carries the times of the keys that typed it. People type
   unevenly; scripts keep a steady beat. Runs whose keystrokes or reaction times are too
-  even to be human are rejected (`backend/convex/lib/humanity.ts`).
+  even to be human are rejected (`backend/convex/lib/humanity.ts`). The thresholds sit
+  well below anything seen in real play: people pause between words quite evenly, so
+  the reaction check has a wide margin.
 - **Review.** A run that would raise a player's best is held for review instead of going
   straight to the board when it looks unusual: very fast typing or reactions, fairly even
-  keystrokes, no typos over 60+ words. The same goes for any new #1, and, once the board has 25
+  keystrokes or reactions, no typos over 60+ words. The same goes for any new #1, and, once the board has 25
   players, any run entering the top 10. It shows as "review" in your last runs until an
   admin approves it.
 - **Two boards.** The leaderboard opens on this week's board: every player's best run since

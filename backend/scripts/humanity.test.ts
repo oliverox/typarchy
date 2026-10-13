@@ -18,6 +18,8 @@ type Typist = {
   reactionMs: number;
   gapMs: number;
   spread: number;
+  // Spread of the time to the first key, when it isn't tied to `spread`.
+  reactionSpread?: number;
   typoRate: number;
 };
 
@@ -33,7 +35,7 @@ function play(typist: Typist, seed: number, wordCount = 40) {
   for (const word of words) {
     const keys: number[] = [];
     let typos = 0;
-    clock += Math.max(1, Math.round(logNormal(typist.reactionMs, typist.spread * 0.6)));
+    clock += Math.max(1, Math.round(logNormal(typist.reactionMs, typist.reactionSpread ?? typist.spread * 0.6)));
     for (let i = 0; i < word.length; i++) {
       if (i > 0) clock += Math.round(logNormal(typist.gapMs, typist.spread));
       if (rand() < typist.typoRate) {
@@ -90,6 +92,22 @@ test("elite typists are never rejected (at worst held for review)", () => {
     const verdict = analyze(words, events);
     assert.ok(verdict.ok, `seed ${seed}: ${!verdict.ok && verdict.reason}`);
   }
+});
+
+// Real players pause between words far more evenly than they type within
+// them: on the board, the reaction spread of a median run is 0.14 and 0.08 is
+// common. Such runs are ranked, not rejected.
+test("people with a steady pause between words are ranked", () => {
+  const steady: Typist = { ...EVERYDAY, reactionSpread: 0.08 };
+  let flagged = 0;
+  for (let seed = 1; seed <= 500; seed++) {
+    const { words, events } = play(steady, seed, 19);
+    const verdict = analyze(words, events);
+    assert.ok(verdict.ok, `seed ${seed}: ${!verdict.ok && verdict.reason}`);
+    assert.ok(verdict.stats.reactionCv !== null && verdict.stats.reactionCv < 0.15, `seed ${seed}: ${verdict.stats.reactionCv}`);
+    if (verdict.flags.length) flagged++;
+  }
+  assert.ok(flagged <= 25, `${flagged}/500 runs held for review`);
 });
 
 test("scripts typing at a steady beat are rejected", () => {
